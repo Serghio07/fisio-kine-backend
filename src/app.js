@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth.routes');
 const usuarioRoutes = require('./routes/usuario.routes');
 const pacienteRoutes = require('./routes/paciente.routes');
 const historiaClinicaRoutes = require('./routes/historiaClinica.routes');
+const sesionRoutes = require('./routes/sesion.routes');
 
 const app = express();
 
@@ -24,6 +25,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/pacientes', pacienteRoutes);
 app.use('/api/historias-clinicas', historiaClinicaRoutes);
+app.use('/api/sesiones', sesionRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

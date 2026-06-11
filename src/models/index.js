@@ -8,6 +8,7 @@ const ExamenKinesico = require('./ExamenKinesico');
 const CondicionActual = require('./CondicionActual');
 const IntervencionClinica = require('./IntervencionClinica');
 const EvaluacionFinal = require('./EvaluacionFinal');
+const Sesion = require('./Sesion');
 
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -33,6 +34,9 @@ IntervencionClinica.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_i
 HistoriaClinica.hasOne(EvaluacionFinal, { foreignKey: 'historia_clinica_id', as: 'evaluacion_final', onDelete: 'CASCADE' });
 EvaluacionFinal.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id' });
 
+Paciente.hasMany(Sesion, { foreignKey: 'paciente_id', as: 'sesiones', onDelete: 'CASCADE' });
+Sesion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+
 module.exports = {
   sequelize,
   Usuario,
@@ -43,5 +47,6 @@ module.exports = {
   ExamenKinesico,
   CondicionActual,
   IntervencionClinica,
-  EvaluacionFinal
+  EvaluacionFinal,
+  Sesion
 };
