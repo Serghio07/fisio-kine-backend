@@ -204,7 +204,10 @@ const descargarPdf = async (req, res, next) => {
   try {
     const planilla = await obtenerCompleta(req.params.id);
     if (!planilla) return res.status(404).json({ message: 'Planilla no encontrada' });
-    return res.status(501).json({ message: 'PDF disponible desde el frontend con la vista de planilla.' });
+    return res.json({
+      message: 'Usa los datos de esta planilla para generar el PDF desde el frontend.',
+      planilla
+    });
   } catch (error) {
     return next(error);
   }
