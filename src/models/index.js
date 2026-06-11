@@ -13,6 +13,7 @@ const InformeMedico = require('./InformeMedico');
 const RegistroSemanal = require('./RegistroSemanal');
 const PlanillaAtencion = require('./PlanillaAtencion');
 const PlanillaSesion = require('./PlanillaSesion');
+const { Cita, ESTADOS_CITA, TIPOS_ATENCION } = require('./Cita');
 
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -56,6 +57,9 @@ PlanillaSesion.belongsTo(PlanillaAtencion, { foreignKey: 'planilla_id', as: 'pla
 Paciente.hasMany(PlanillaSesion, { foreignKey: 'paciente_id', as: 'planilla_sesiones', onDelete: 'CASCADE' });
 PlanillaSesion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
 
+Paciente.hasMany(Cita, { foreignKey: 'paciente_id', as: 'citas', onDelete: 'RESTRICT' });
+Cita.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+
 module.exports = {
   sequelize,
   Usuario,
@@ -71,5 +75,8 @@ module.exports = {
   InformeMedico,
   RegistroSemanal,
   PlanillaAtencion,
-  PlanillaSesion
+  PlanillaSesion,
+  Cita,
+  ESTADOS_CITA,
+  TIPOS_ATENCION
 };
