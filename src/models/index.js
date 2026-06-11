@@ -9,6 +9,10 @@ const CondicionActual = require('./CondicionActual');
 const IntervencionClinica = require('./IntervencionClinica');
 const EvaluacionFinal = require('./EvaluacionFinal');
 const Sesion = require('./Sesion');
+const InformeMedico = require('./InformeMedico');
+const RegistroSemanal = require('./RegistroSemanal');
+const PlanillaAtencion = require('./PlanillaAtencion');
+const PlanillaSesion = require('./PlanillaSesion');
 
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -37,6 +41,21 @@ EvaluacionFinal.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id' }
 Paciente.hasMany(Sesion, { foreignKey: 'paciente_id', as: 'sesiones', onDelete: 'CASCADE' });
 Sesion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
 
+Paciente.hasMany(InformeMedico, { foreignKey: 'paciente_id', as: 'informes_medicos', onDelete: 'CASCADE' });
+InformeMedico.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+
+Paciente.hasMany(RegistroSemanal, { foreignKey: 'paciente_id', as: 'registros_semanales', onDelete: 'CASCADE' });
+RegistroSemanal.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+
+Paciente.hasMany(PlanillaAtencion, { foreignKey: 'paciente_id', as: 'planillas_atencion', onDelete: 'CASCADE' });
+PlanillaAtencion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+
+PlanillaAtencion.hasMany(PlanillaSesion, { foreignKey: 'planilla_id', as: 'sesiones', onDelete: 'CASCADE' });
+PlanillaSesion.belongsTo(PlanillaAtencion, { foreignKey: 'planilla_id', as: 'planilla' });
+
+Paciente.hasMany(PlanillaSesion, { foreignKey: 'paciente_id', as: 'planilla_sesiones', onDelete: 'CASCADE' });
+PlanillaSesion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+
 module.exports = {
   sequelize,
   Usuario,
@@ -48,5 +67,9 @@ module.exports = {
   CondicionActual,
   IntervencionClinica,
   EvaluacionFinal,
-  Sesion
+  Sesion,
+  InformeMedico,
+  RegistroSemanal,
+  PlanillaAtencion,
+  PlanillaSesion
 };

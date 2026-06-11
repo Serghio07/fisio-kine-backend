@@ -8,10 +8,12 @@ const {
   actualizarPaciente,
   eliminarPaciente
 } = require('../controllers/paciente.controller');
+const { listarPlanillasPaciente } = require('../controllers/planillaAtencion.controller');
 
 router.use(autenticar);
 
 router.get('/', listarPacientes);
+router.get('/:id/planillas-atencion', listarPlanillasPaciente);
 router.get('/:id', obtenerPaciente);
 router.post('/', autorizarRoles('admin', 'personal'), crearPaciente);
 router.put('/:id', autorizarRoles('admin', 'personal'), actualizarPaciente);

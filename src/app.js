@@ -8,6 +8,10 @@ const usuarioRoutes = require('./routes/usuario.routes');
 const pacienteRoutes = require('./routes/paciente.routes');
 const historiaClinicaRoutes = require('./routes/historiaClinica.routes');
 const sesionRoutes = require('./routes/sesion.routes');
+const informeMedicoRoutes = require('./routes/informeMedico.routes');
+const registroSemanalRoutes = require('./routes/registroSemanal.routes');
+const planillaAtencionRoutes = require('./routes/planillaAtencion.routes');
+const planillaSesionRoutes = require('./routes/planillaSesion.routes');
 
 const app = express();
 
@@ -26,6 +30,10 @@ app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/pacientes', pacienteRoutes);
 app.use('/api/historias-clinicas', historiaClinicaRoutes);
 app.use('/api/sesiones', sesionRoutes);
+app.use('/api/sesiones-semanales', registroSemanalRoutes);
+app.use('/api/informes-medicos', informeMedicoRoutes);
+app.use('/api/planillas-atencion', planillaAtencionRoutes);
+app.use('/api/planilla-sesiones', planillaSesionRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });
