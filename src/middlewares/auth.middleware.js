@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { Usuario } = require('../models');
 
+const usuarioActivo = (usuario) => usuario.estado === true || usuario.estado === 'activo';
+
 const autenticar = async (req, res, next) => {
   try {
     const header = req.headers.authorization;
@@ -13,11 +15,17 @@ const autenticar = async (req, res, next) => {
     const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret');
     const usuario = await Usuario.findByPk(payload.id);
 
-    if (!usuario || !usuario.estado) {
+    if (!usuario || !usuarioActivo(usuario)) {
       return res.status(401).json({ message: 'Usuario no autorizado' });
     }
 
     req.usuario = usuario;
+    req.user = {
+      id: usuario.id,
+      usuario: usuario.usuario,
+      rol: usuario.rol,
+      estado: usuario.estado
+    };
     return next();
   } catch (error) {
     return res.status(401).json({ message: 'Token invalido o expirado' });

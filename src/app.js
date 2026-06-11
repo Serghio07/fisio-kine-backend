@@ -13,6 +13,7 @@ const registroSemanalRoutes = require('./routes/registroSemanal.routes');
 const planillaAtencionRoutes = require('./routes/planillaAtencion.routes');
 const planillaSesionRoutes = require('./routes/planillaSesion.routes');
 const citaRoutes = require('./routes/cita.routes');
+const dashboardRoutes = require('./routes/dashboard.routes');
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use('/api/informes-medicos', informeMedicoRoutes);
 app.use('/api/planillas-atencion', planillaAtencionRoutes);
 app.use('/api/planilla-sesiones', planillaSesionRoutes);
 app.use('/api/citas', citaRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

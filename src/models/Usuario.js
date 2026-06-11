@@ -15,7 +15,14 @@ const Usuario = sequelize.define(
       allowNull: false,
       defaultValue: 'personal'
     },
-    estado: { type: DataTypes.BOOLEAN, defaultValue: true },
+    estado: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: 'activo',
+      validate: {
+        isIn: [['activo', 'inactivo']]
+      }
+    },
     ultimo_acceso: DataTypes.DATE
   },
   {
