@@ -1,0 +1,46 @@
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+
+const authRoutes = require('./routes/auth.routes');
+const usuarioRoutes = require('./routes/usuario.routes');
+const pacienteRoutes = require('./routes/paciente.routes');
+const historiaClinicaRoutes = require('./routes/historiaClinica.routes');
+
+const app = express();
+
+app.use(helmet());
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan('dev'));
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', service: 'Physio Active API' });
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/usuarios', usuarioRoutes);
+app.use('/api/pacientes', pacienteRoutes);
+app.use('/api/historias-clinicas', historiaClinicaRoutes);
+
+app.use((req, res) => {
+  res.status(404).json({ message: 'Ruta no encontrada' });
+});
+
+app.use((error, req, res, next) => {
+  if (error.name === 'SequelizeValidationError' || error.name === 'SequelizeUniqueConstraintError') {
+    return res.status(400).json({
+      message: 'Error de validacion',
+      errors: error.errors.map((item) => item.message)
+    });
+  }
+
+  return res.status(500).json({
+    message: 'Error interno del servidor',
+    error: process.env.NODE_ENV === 'development' ? error.message : undefined
+  });
+});
+
+module.exports = app;
