@@ -20,7 +20,15 @@ const Usuario = sequelize.define(
       allowNull: false,
       defaultValue: 'activo',
       validate: {
-        isIn: [['activo', 'inactivo']]
+        isIn: [['activo', 'inactivo', 'bloqueado']]
+      }
+    },
+    intentos_fallidos: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      validate: {
+        min: 0
       }
     },
     ultimo_acceso: DataTypes.DATE

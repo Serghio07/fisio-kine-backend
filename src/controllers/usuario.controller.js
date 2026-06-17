@@ -8,6 +8,7 @@ const normalizarEstado = (estado = 'activo') => {
   if (estado === false) return 'inactivo';
   return estado || 'activo';
 };
+const estadosPermitidos = ['activo', 'inactivo', 'bloqueado'];
 
 const listarUsuarios = async (req, res, next) => {
   try {
@@ -56,8 +57,8 @@ const crearUsuario = async (req, res, next) => {
       return res.status(400).json({ message: 'rol solo puede ser admin o personal' });
     }
 
-    if (!['activo', 'inactivo'].includes(estado)) {
-      return res.status(400).json({ message: 'estado solo puede ser activo o inactivo' });
+    if (!estadosPermitidos.includes(estado)) {
+      return res.status(400).json({ message: 'estado solo puede ser activo, inactivo o bloqueado' });
     }
 
     const existente = await Usuario.findOne({ where: { usuario } });
@@ -70,7 +71,7 @@ const crearUsuario = async (req, res, next) => {
       if (emailExistente) return res.status(409).json({ message: 'El email ya esta registrado' });
     }
 
-    const nuevoUsuario = await Usuario.create({ nombre, usuario, email, password, rol, estado });
+    const nuevoUsuario = await Usuario.create({ nombre, usuario, email, password, rol, estado, intentos_fallidos: 0 });
     return res.status(201).json({ message: 'Usuario creado correctamente', usuario: nuevoUsuario });
   } catch (error) {
     return next(error);
@@ -105,12 +106,16 @@ const actualizarUsuario = async (req, res, next) => {
 
     if (Object.prototype.hasOwnProperty.call(payload, 'estado')) {
       payload.estado = normalizarEstado(payload.estado);
-      if (!['activo', 'inactivo'].includes(payload.estado)) {
-        return res.status(400).json({ message: 'estado solo puede ser activo o inactivo' });
+      if (!estadosPermitidos.includes(payload.estado)) {
+        return res.status(400).json({ message: 'estado solo puede ser activo, inactivo o bloqueado' });
       }
 
-      if (String(req.user?.id) === String(usuario.id) && payload.estado === 'inactivo') {
-        return res.status(400).json({ message: 'No puedes desactivar tu propio usuario' });
+      if (String(req.user?.id) === String(usuario.id) && ['inactivo', 'bloqueado'].includes(payload.estado)) {
+        return res.status(400).json({ message: 'No puedes desactivar o bloquear tu propio usuario' });
+      }
+
+      if (payload.estado === 'activo') {
+        payload.intentos_fallidos = 0;
       }
     }
 
@@ -127,16 +132,16 @@ const cambiarEstadoUsuario = async (req, res, next) => {
     if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado' });
 
     const estado = normalizarEstado(req.body.estado);
-    if (!['activo', 'inactivo'].includes(estado)) {
-      return res.status(400).json({ message: 'estado solo puede ser activo o inactivo' });
+    if (!estadosPermitidos.includes(estado)) {
+      return res.status(400).json({ message: 'estado solo puede ser activo, inactivo o bloqueado' });
     }
 
-    if (String(req.user?.id) === String(usuario.id) && estado === 'inactivo') {
-      return res.status(400).json({ message: 'No puedes desactivar tu propio usuario' });
+    if (String(req.user?.id) === String(usuario.id) && ['inactivo', 'bloqueado'].includes(estado)) {
+      return res.status(400).json({ message: 'No puedes desactivar o bloquear tu propio usuario' });
     }
 
-    await usuario.update({ estado });
-    return res.json({ message: 'Estado actualizado correctamente', usuario });
+    await usuario.update({ estado, intentos_fallidos: estado === 'activo' ? 0 : usuario.intentos_fallidos });
+    return res.json({ message: estado === 'activo' ? 'Usuario desbloqueado correctamente' : 'Estado actualizado correctamente', usuario });
   } catch (error) {
     return next(error);
   }

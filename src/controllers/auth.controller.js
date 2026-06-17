@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { Usuario } = require('../models');
 
 const usuarioActivo = (usuario) => usuario.estado === true || usuario.estado === 'activo';
+const MAX_INTENTOS_LOGIN = 5;
 
 const login = async (req, res, next) => {
   try {
@@ -16,16 +17,33 @@ const login = async (req, res, next) => {
       return res.status(401).json({ message: 'Credenciales invalidas' });
     }
 
+    if (usuarioDb.estado === 'bloqueado') {
+      return res.status(403).json({ message: 'Usuario bloqueado por 5 intentos fallidos. Solicita desbloqueo al administrador.' });
+    }
+
     if (!usuarioActivo(usuarioDb)) {
       return res.status(403).json({ message: 'Usuario inactivo' });
     }
 
     const passwordValido = await usuarioDb.validarPassword(password);
     if (!passwordValido) {
-      return res.status(401).json({ message: 'Credenciales invalidas' });
+      const intentos = (usuarioDb.intentos_fallidos || 0) + 1;
+      const bloqueado = intentos >= MAX_INTENTOS_LOGIN;
+
+      await usuarioDb.update({
+        intentos_fallidos: intentos,
+        estado: bloqueado ? 'bloqueado' : usuarioDb.estado
+      });
+
+      if (bloqueado) {
+        return res.status(403).json({ message: 'Usuario bloqueado por 5 intentos fallidos. Solicita desbloqueo al administrador.' });
+      }
+
+      return res.status(401).json({ message: `Credenciales invalidas. Intentos restantes: ${MAX_INTENTOS_LOGIN - intentos}` });
     }
 
     usuarioDb.ultimo_acceso = new Date();
+    usuarioDb.intentos_fallidos = 0;
     await usuarioDb.save();
 
     const token = jwt.sign(
