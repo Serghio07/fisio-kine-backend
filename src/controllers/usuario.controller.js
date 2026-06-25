@@ -1,4 +1,4 @@
-const { Usuario } = require('../models');
+const { Personal, Usuario, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const { validarImagen } = require('../utils/imagen');
 
@@ -10,6 +10,41 @@ const normalizarEstado = (estado = 'activo') => {
   return estado || 'activo';
 };
 const estadosPermitidos = ['pendiente', 'activo', 'inactivo', 'bloqueado', 'rechazado'];
+const includeFichaPersonal = [{ model: Personal, as: 'ficha_personal' }];
+const camposLaborales = [
+  'apellido_paterno', 'apellido_materno', 'nombres', 'ci', 'cargo', 'dias_trabajo',
+  'hora_entrada', 'hora_salida', 'sueldo_base', 'tipo_pago', 'direccion',
+  'fecha_ingreso', 'observaciones'
+];
+const datosLaborales = (body, estadoUsuario = 'activo') => ({
+  apellido_paterno: limpiarTexto(body.apellido_paterno),
+  apellido_materno: limpiarTexto(body.apellido_materno) || null,
+  nombres: limpiarTexto(body.nombres),
+  ci: limpiarTexto(body.ci),
+  cargo: limpiarTexto(body.cargo),
+  dias_trabajo: Array.isArray(body.dias_trabajo) ? body.dias_trabajo : [],
+  hora_entrada: body.hora_entrada || null,
+  hora_salida: body.hora_salida || null,
+  sueldo_base: body.tipo_pago === 'por_servicio' ? null : body.sueldo_base,
+  tipo_pago: body.tipo_pago || 'mensual',
+  telefono: limpiarTexto(body.telefono) || null,
+  direccion: limpiarTexto(body.direccion) || null,
+  fecha_ingreso: body.fecha_ingreso,
+  estado: estadoUsuario === 'activo' ? 'activo' : 'inactivo',
+  observaciones: limpiarTexto(body.observaciones) || null
+});
+const validarDatosLaborales = (data) => {
+  if (!data.apellido_paterno || !data.nombres || !data.ci || !data.cargo || !data.fecha_ingreso) {
+    return 'Apellido paterno, nombres, cedula, cargo y fecha de ingreso son obligatorios.';
+  }
+  if (!data.dias_trabajo.length || !data.hora_entrada || !data.hora_salida) {
+    return 'Selecciona los dias de trabajo y registra la hora de entrada y salida.';
+  }
+  if (data.hora_salida <= data.hora_entrada) return 'La hora de salida debe ser posterior a la hora de entrada.';
+  if (!['mensual', 'por_servicio'].includes(data.tipo_pago)) return 'Tipo de pago no valido.';
+  if (data.tipo_pago === 'mensual' && !(Number(data.sueldo_base) >= 0)) return 'Registra un sueldo base valido.';
+  return null;
+};
 
 const listarUsuarios = async (req, res, next) => {
   try {
@@ -24,7 +59,7 @@ const listarUsuarios = async (req, res, next) => {
       ];
     }
 
-    const usuarios = await Usuario.findAll({ where, attributes: atributosPublicos, order: [['id', 'ASC']] });
+    const usuarios = await Usuario.findAll({ where, attributes: atributosPublicos, include: includeFichaPersonal, order: [['id', 'ASC']] });
     return res.json(usuarios);
   } catch (error) {
     return next(error);
@@ -33,7 +68,7 @@ const listarUsuarios = async (req, res, next) => {
 
 const obtenerUsuario = async (req, res, next) => {
   try {
-    const usuario = await Usuario.findByPk(req.params.id, { attributes: atributosPublicos });
+    const usuario = await Usuario.findByPk(req.params.id, { attributes: atributosPublicos, include: includeFichaPersonal });
     if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado' });
     return res.json(usuario);
   } catch (error) {
@@ -54,7 +89,7 @@ const listarProfesionalesActivos = async (req, res, next) => {
   }
 };
 
-const crearUsuario = async (req, res, next) => {
+const crearUsuarioAnterior = async (req, res, next) => {
   try {
     const nombre = limpiarTexto(req.body.nombre);
     const usuario = limpiarTexto(req.body.usuario);
@@ -106,7 +141,7 @@ const crearUsuario = async (req, res, next) => {
   }
 };
 
-const actualizarUsuario = async (req, res, next) => {
+const actualizarUsuarioAnterior = async (req, res, next) => {
   try {
     const usuario = await Usuario.findByPk(req.params.id);
     if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado' });
@@ -182,6 +217,10 @@ const cambiarEstadoUsuario = async (req, res, next) => {
       intentos_fallidos: estado === 'activo' ? 0 : usuario.intentos_fallidos,
       bloqueado_hasta: estado === 'activo' ? null : usuario.bloqueado_hasta
     });
+    await Personal.update(
+      { estado: estado === 'activo' ? 'activo' : 'inactivo' },
+      { where: { usuario_id: usuario.id } }
+    );
     return res.json({ message: estado === 'activo' ? 'Usuario desbloqueado correctamente' : 'Estado actualizado correctamente', usuario });
   } catch (error) {
     return next(error);
@@ -233,6 +272,150 @@ const eliminarUsuario = async (req, res, next) => {
     await usuario.destroy();
     return res.json({ message: 'Usuario eliminado correctamente' });
   } catch (error) {
+    return next(error);
+  }
+};
+
+const crearUsuario = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const estado = normalizarEstado(req.body.estado);
+    const laboral = datosLaborales(req.body, estado);
+    const errorLaboral = validarDatosLaborales(laboral);
+    if (errorLaboral) {
+      await transaction.rollback();
+      return res.status(400).json({ message: errorLaboral });
+    }
+
+    const nombre = [laboral.nombres, laboral.apellido_paterno, laboral.apellido_materno].filter(Boolean).join(' ');
+    const usuario = limpiarTexto(req.body.usuario);
+    const email = limpiarTexto(req.body.email) || null;
+    const telefono = limpiarTexto(req.body.telefono) || null;
+    const foto = req.body.foto || null;
+    const password = limpiarTexto(req.body.password || req.body.contrasena);
+
+    if (!usuario || !email || !password) {
+      await transaction.rollback();
+      return res.status(400).json({ message: 'Usuario, correo electronico y contrasena son obligatorios.' });
+    }
+    if (!estadosPermitidos.includes(estado)) {
+      await transaction.rollback();
+      return res.status(400).json({ message: 'Estado de usuario no valido.' });
+    }
+    const errorImagen = validarImagen(foto);
+    if (errorImagen) {
+      await transaction.rollback();
+      return res.status(400).json({ message: errorImagen });
+    }
+    if (await Usuario.findOne({ where: { usuario }, transaction })) {
+      await transaction.rollback();
+      return res.status(409).json({ message: 'El usuario ya esta registrado.' });
+    }
+    if (await Usuario.findOne({ where: { email }, transaction })) {
+      await transaction.rollback();
+      return res.status(409).json({ message: 'El correo electronico ya esta registrado.' });
+    }
+
+    const nuevoUsuario = await Usuario.create({
+      nombre,
+      usuario,
+      email,
+      telefono,
+      foto,
+      password,
+      rol: 'personal',
+      estado,
+      activo: estado === 'activo',
+      intentos_fallidos: 0
+    }, { transaction });
+    await Personal.create({ ...laboral, usuario_id: nuevoUsuario.id }, { transaction });
+    await transaction.commit();
+
+    const completo = await Usuario.findByPk(nuevoUsuario.id, {
+      attributes: atributosPublicos,
+      include: includeFichaPersonal
+    });
+    return res.status(201).json({ message: 'Personal y cuenta creados correctamente.', usuario: completo });
+  } catch (error) {
+    if (!transaction.finished) await transaction.rollback();
+    return next(error);
+  }
+};
+
+const actualizarUsuario = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const usuario = await Usuario.findByPk(req.params.id, { transaction });
+    if (!usuario) {
+      await transaction.rollback();
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    const payload = { ...req.body };
+    camposLaborales.forEach((campo) => delete payload[campo]);
+    delete payload.ficha_personal;
+    if (Object.prototype.hasOwnProperty.call(payload, 'usuario')) payload.usuario = limpiarTexto(payload.usuario);
+    if (Object.prototype.hasOwnProperty.call(payload, 'email')) payload.email = limpiarTexto(payload.email) || null;
+    if (Object.prototype.hasOwnProperty.call(payload, 'telefono')) payload.telefono = limpiarTexto(payload.telefono) || null;
+    if (Object.prototype.hasOwnProperty.call(payload, 'password')) {
+      payload.password = limpiarTexto(payload.password);
+      if (!payload.password) delete payload.password;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'foto')) {
+      payload.foto = payload.foto || null;
+      const errorImagen = validarImagen(payload.foto);
+      if (errorImagen) {
+        await transaction.rollback();
+        return res.status(400).json({ message: errorImagen });
+      }
+    }
+    if (payload.email && await Usuario.findOne({ where: { email: payload.email, id: { [Op.ne]: usuario.id } }, transaction })) {
+      await transaction.rollback();
+      return res.status(409).json({ message: 'El email ya esta registrado' });
+    }
+    if (payload.usuario && await Usuario.findOne({ where: { usuario: payload.usuario, id: { [Op.ne]: usuario.id } }, transaction })) {
+      await transaction.rollback();
+      return res.status(409).json({ message: 'El usuario ya existe' });
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'estado')) {
+      payload.estado = normalizarEstado(payload.estado);
+      if (!estadosPermitidos.includes(payload.estado)) {
+        await transaction.rollback();
+        return res.status(400).json({ message: 'Estado de usuario no valido.' });
+      }
+      if (String(req.user?.id) === String(usuario.id) && ['inactivo', 'bloqueado'].includes(payload.estado)) {
+        await transaction.rollback();
+        return res.status(400).json({ message: 'No puedes desactivar o bloquear tu propio usuario' });
+      }
+      payload.activo = payload.estado === 'activo';
+      if (payload.estado === 'activo') {
+        payload.intentos_fallidos = 0;
+        payload.bloqueado_hasta = null;
+      }
+    }
+
+    if (usuario.rol === 'personal') {
+      const laboral = datosLaborales(req.body, payload.estado || usuario.estado);
+      const errorLaboral = validarDatosLaborales(laboral);
+      if (errorLaboral) {
+        await transaction.rollback();
+        return res.status(400).json({ message: errorLaboral });
+      }
+      payload.nombre = [laboral.nombres, laboral.apellido_paterno, laboral.apellido_materno].filter(Boolean).join(' ');
+      const ficha = await Personal.findOne({ where: { usuario_id: usuario.id }, transaction });
+      if (ficha) await ficha.update(laboral, { transaction });
+      else await Personal.create({ ...laboral, usuario_id: usuario.id }, { transaction });
+    }
+
+    await usuario.update(payload, { transaction });
+    await transaction.commit();
+    const completo = await Usuario.findByPk(usuario.id, {
+      attributes: atributosPublicos,
+      include: includeFichaPersonal
+    });
+    return res.json({ message: 'Usuario y datos laborales actualizados correctamente', usuario: completo });
+  } catch (error) {
+    if (!transaction.finished) await transaction.rollback();
     return next(error);
   }
 };

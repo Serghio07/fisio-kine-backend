@@ -97,6 +97,12 @@ const actualizarPersonal = async (req, res, next) => {
     const error = validar(payload);
     if (error) return res.status(400).json({ message: error });
     await personal.update(payload);
+    if (personal.usuario_id) {
+      await Usuario.update(
+        { estado: payload.estado, activo: payload.estado === 'activo' },
+        { where: { id: personal.usuario_id } }
+      );
+    }
     return res.json(await Personal.findByPk(personal.id, { include: includeUsuario }));
   } catch (error) {
     return next(error);
@@ -109,6 +115,12 @@ const cambiarEstadoPersonal = async (req, res, next) => {
     const personal = await Personal.findByPk(req.params.id);
     if (!personal) return res.status(404).json({ message: 'Personal no encontrado.' });
     await personal.update({ estado: req.body.estado });
+    if (personal.usuario_id) {
+      await Usuario.update(
+        { estado: req.body.estado, activo: req.body.estado === 'activo' },
+        { where: { id: personal.usuario_id } }
+      );
+    }
     return res.json(personal);
   } catch (error) {
     return next(error);
