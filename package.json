@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "seed:admin": "node src/seeders/admin.js",
     "seed:demo": "node src/seeders/demo.js",
-    "reset:admin": "node src/seeders/admin.js --reset"
+    "reset:admin": "node src/seeders/admin.js --reset",
+    "sync:sesiones-semanales": "node src/scripts/syncSesionesSemanales.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

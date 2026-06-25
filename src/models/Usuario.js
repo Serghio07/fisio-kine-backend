@@ -9,6 +9,7 @@ const Usuario = sequelize.define(
     nombre: { type: DataTypes.STRING(120), allowNull: false },
     usuario: { type: DataTypes.STRING(80), allowNull: false, unique: true },
     email: { type: DataTypes.STRING(120), unique: true, validate: { isEmail: true } },
+    telefono: { type: DataTypes.STRING(30), allowNull: true },
     password: { type: DataTypes.STRING(255), allowNull: false },
     rol: {
       type: DataTypes.ENUM('admin', 'personal'),
@@ -20,8 +21,13 @@ const Usuario = sequelize.define(
       allowNull: false,
       defaultValue: 'activo',
       validate: {
-        isIn: [['activo', 'inactivo', 'bloqueado']]
+        isIn: [['pendiente', 'activo', 'inactivo', 'bloqueado', 'rechazado']]
       }
+    },
+    activo: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true
     },
     intentos_fallidos: {
       type: DataTypes.INTEGER,
@@ -31,6 +37,7 @@ const Usuario = sequelize.define(
         min: 0
       }
     },
+    bloqueado_hasta: DataTypes.DATE,
     ultimo_acceso: DataTypes.DATE
   },
   {

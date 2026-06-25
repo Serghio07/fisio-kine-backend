@@ -36,6 +36,20 @@ const Sesion = sequelize.define(
         isIn: [['QR', 'Efectivo', 'Transferencia', 'Pendiente']]
       }
     },
+    estado_pago: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: 'Pendiente',
+      validate: {
+        isIn: [['Pagado', 'Pendiente', 'Parcial']]
+      }
+    },
+    aplica_farmacos: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
+    },
+    observacion_farmacos: DataTypes.TEXT,
     observacion: DataTypes.TEXT
   },
   {

@@ -1,4 +1,4 @@
-const { Paciente } = require('../models');
+const { HistoriaClinica, Paciente } = require('../models');
 
 const validarPaciente = ({ nombres, sexo }) => {
   if (!nombres) return 'nombres es requerido';
@@ -8,7 +8,17 @@ const validarPaciente = ({ nombres, sexo }) => {
 
 const listarPacientes = async (req, res, next) => {
   try {
-    const pacientes = await Paciente.findAll({ order: [['id', 'ASC']] });
+    const pacientes = await Paciente.findAll({
+      include: [{
+        model: HistoriaClinica,
+        as: 'historias_clinicas',
+        attributes: ['diagnostico_medico', 'fecha_evaluacion'],
+        separate: true,
+        limit: 1,
+        order: [['fecha_evaluacion', 'DESC'], ['id', 'DESC']]
+      }],
+      order: [['id', 'ASC']]
+    });
     return res.json(pacientes);
   } catch (error) {
     return next(error);

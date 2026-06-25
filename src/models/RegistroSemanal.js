@@ -18,6 +18,26 @@ const RegistroSemanal = sequelize.define(
     jueves: DataTypes.STRING(30),
     viernes: DataTypes.STRING(30),
     sabado: DataTypes.STRING(30),
+    sesiones_resumen: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: {}
+    },
+    total_sesiones: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    sincronizado_sesiones: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
+    },
+    generado_automaticamente: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
+    },
     aplica_farmacos: { type: DataTypes.BOOLEAN, defaultValue: false },
     debe_bs: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     observacion: DataTypes.TEXT

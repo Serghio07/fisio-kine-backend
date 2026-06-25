@@ -1,49 +1,77 @@
 const jwt = require('jsonwebtoken');
+const { Op } = require('sequelize');
 const { Usuario } = require('../models');
 
-const usuarioActivo = (usuario) => usuario.estado === true || usuario.estado === 'activo';
 const MAX_INTENTOS_LOGIN = 5;
+const MINUTOS_BLOQUEO = 15;
+const normalizarIdentificador = (value = '') => String(value).trim().toLowerCase();
 
 const login = async (req, res, next) => {
   try {
-    const { usuario, password } = req.body;
+    const identificador = normalizarIdentificador(req.body.usuario);
+    const { password } = req.body;
 
-    if (!usuario || !password) {
-      return res.status(400).json({ message: 'usuario y password son requeridos' });
+    if (!identificador || !password) {
+      return res.status(400).json({ message: 'El usuario o correo y la contraseña son obligatorios.' });
     }
 
-    const usuarioDb = await Usuario.findOne({ where: { usuario } });
+    const usuarioDb = await Usuario.findOne({
+      where: {
+        [Op.or]: [
+          { usuario: { [Op.iLike]: identificador } },
+          { email: { [Op.iLike]: identificador } }
+        ]
+      }
+    });
     if (!usuarioDb) {
-      return res.status(401).json({ message: 'Credenciales invalidas' });
+      return res.status(401).json({ message: 'Credenciales incorrectas.' });
     }
 
+    if (usuarioDb.estado === 'pendiente') {
+      return res.status(403).json({ message: 'Tu cuenta está pendiente de aprobación por el administrador.' });
+    }
     if (usuarioDb.estado === 'bloqueado') {
-      return res.status(403).json({ message: 'Usuario bloqueado por 5 intentos fallidos. Solicita desbloqueo al administrador.' });
+      return res.status(403).json({ message: 'Tu cuenta ha sido bloqueada. Comunícate con el administrador.' });
+    }
+    if (usuarioDb.estado === 'rechazado') {
+      return res.status(403).json({ message: 'Tu solicitud de acceso fue rechazada. Comunícate con el administrador.' });
+    }
+    if (usuarioDb.estado !== 'activo' || usuarioDb.activo === false) {
+      return res.status(403).json({ message: 'Tu cuenta no está habilitada. Comunícate con el administrador.' });
     }
 
-    if (!usuarioActivo(usuarioDb)) {
-      return res.status(403).json({ message: 'Usuario inactivo' });
+    const ahora = new Date();
+    if (usuarioDb.bloqueado_hasta && new Date(usuarioDb.bloqueado_hasta) > ahora) {
+      return res.status(429).json({
+        message: 'Demasiados intentos fallidos. Intenta nuevamente en unos minutos.'
+      });
+    }
+    if (usuarioDb.bloqueado_hasta) {
+      await usuarioDb.update({ bloqueado_hasta: null, intentos_fallidos: 0 });
     }
 
     const passwordValido = await usuarioDb.validarPassword(password);
     if (!passwordValido) {
       const intentos = (usuarioDb.intentos_fallidos || 0) + 1;
-      const bloqueado = intentos >= MAX_INTENTOS_LOGIN;
-
+      const bloqueoTemporal = intentos >= MAX_INTENTOS_LOGIN
+        ? new Date(Date.now() + MINUTOS_BLOQUEO * 60 * 1000)
+        : null;
       await usuarioDb.update({
-        intentos_fallidos: intentos,
-        estado: bloqueado ? 'bloqueado' : usuarioDb.estado
+        intentos_fallidos: bloqueoTemporal ? 0 : intentos,
+        bloqueado_hasta: bloqueoTemporal
       });
 
-      if (bloqueado) {
-        return res.status(403).json({ message: 'Usuario bloqueado por 5 intentos fallidos. Solicita desbloqueo al administrador.' });
+      if (bloqueoTemporal) {
+        return res.status(429).json({
+          message: `Demasiados intentos fallidos. El acceso se bloqueó temporalmente por ${MINUTOS_BLOQUEO} minutos.`
+        });
       }
-
-      return res.status(401).json({ message: `Credenciales invalidas. Intentos restantes: ${MAX_INTENTOS_LOGIN - intentos}` });
+      return res.status(401).json({ message: 'Credenciales incorrectas.' });
     }
 
     usuarioDb.ultimo_acceso = new Date();
     usuarioDb.intentos_fallidos = 0;
+    usuarioDb.bloqueado_hasta = null;
     await usuarioDb.save();
 
     const token = jwt.sign(
@@ -52,36 +80,50 @@ const login = async (req, res, next) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
     );
 
-    return res.json({ message: 'Login exitoso', token, usuario: usuarioDb });
+    return res.json({ message: 'Inicio de sesión exitoso.', token, usuario: usuarioDb });
   } catch (error) {
     return next(error);
   }
 };
 
-const registrar = async (req, res, next) => {
+const solicitarAcceso = async (req, res, next) => {
   try {
-    const { nombre, usuario, email, password } = req.body;
+    const nombre = String(req.body.nombre || '').trim();
+    const usuario = normalizarIdentificador(req.body.usuario);
+    const email = normalizarIdentificador(req.body.email);
+    const telefono = String(req.body.telefono || '').trim() || null;
+    const { password } = req.body;
 
-    if (!nombre || !usuario || !password) {
-      return res.status(400).json({ message: 'nombre, usuario y password son requeridos' });
+    if (!nombre || !usuario || !email || !password) {
+      return res.status(400).json({ message: 'Nombre, usuario, correo electrónico y contraseña son obligatorios.' });
     }
-
-    const existente = await Usuario.findOne({ where: { usuario } });
+    const existente = await Usuario.findOne({
+      where: {
+        [Op.or]: [
+          { usuario: { [Op.iLike]: usuario } },
+          { email: { [Op.iLike]: email } }
+        ]
+      }
+    });
     if (existente) {
-      return res.status(409).json({ message: 'El usuario ya existe' });
+      const campo = existente.usuario === usuario ? 'usuario' : 'correo electrónico';
+      return res.status(409).json({ message: `El ${campo} ya está registrado.` });
     }
 
     const nuevoUsuario = await Usuario.create({
       nombre,
       usuario,
       email,
+      telefono,
       password,
       rol: 'personal',
-      estado: 'activo'
+      estado: 'pendiente',
+      activo: false,
+      intentos_fallidos: 0
     });
 
     return res.status(201).json({
-      message: 'Usuario registrado correctamente',
+      message: 'Solicitud enviada correctamente. El administrador revisará tu cuenta antes de habilitar el acceso.',
       usuario: nuevoUsuario
     });
   } catch (error) {
@@ -89,4 +131,4 @@ const registrar = async (req, res, next) => {
   }
 };
 
-module.exports = { login, registrar };
+module.exports = { login, solicitarAcceso };

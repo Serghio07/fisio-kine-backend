@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { Usuario } = require('../models');
 
-const usuarioActivo = (usuario) => usuario.estado === true || usuario.estado === 'activo';
+const usuarioActivo = (usuario) => usuario.estado === 'activo' && usuario.activo !== false;
 
 const autenticar = async (req, res, next) => {
   try {

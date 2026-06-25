@@ -11,18 +11,20 @@ const crearAdmin = async () => {
     }
 
     const usuario = process.env.ADMIN_USER || 'admin';
-    const password = process.env.ADMIN_PASSWORD || 'admin123';
+    const password = process.env.ADMIN_PASSWORD;
     const debeResetear = process.argv.includes('--reset') || process.env.ADMIN_RESET_PASSWORD === 'true';
     const existente = await Usuario.findOne({ where: { usuario } });
 
     if (existente) {
       if (debeResetear) {
+        if (!password) throw new Error('Configura ADMIN_PASSWORD antes de restablecer el administrador');
         await existente.update({
           nombre: process.env.ADMIN_NAME || existente.nombre || 'Administrador',
           email: process.env.ADMIN_EMAIL || existente.email || 'admin@physioactive.com',
           password,
           rol: 'admin',
-          estado: 'activo'
+          estado: 'activo',
+          activo: true
         });
 
         console.log(`Password del usuario ${usuario} actualizado`);
@@ -33,13 +35,16 @@ const crearAdmin = async () => {
       return;
     }
 
+    if (!password) throw new Error('Configura ADMIN_PASSWORD antes de crear el administrador');
+
     const admin = await Usuario.create({
       nombre: process.env.ADMIN_NAME || 'Administrador',
       usuario,
       email: process.env.ADMIN_EMAIL || 'admin@physioactive.com',
       password,
       rol: 'admin',
-      estado: 'activo'
+      estado: 'activo',
+      activo: true
     });
 
     console.log(`Administrador creado: ${admin.usuario}`);

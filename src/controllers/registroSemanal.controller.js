@@ -24,7 +24,6 @@ const normalizar = (body) => ({
   jueves: body.jueves,
   viernes: body.viernes,
   sabado: body.sabado,
-  aplica_farmacos: Boolean(body.aplica_farmacos),
   debe_bs: body.debe_bs === '' || body.debe_bs === null ? 0 : Number(body.debe_bs || 0),
   observacion: body.observacion
 });
@@ -56,7 +55,29 @@ const crearRegistro = async (req, res, next) => {
     const paciente = await Paciente.findByPk(req.body.paciente_id);
     if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado' });
 
-    const registro = await RegistroSemanal.create(normalizar(req.body));
+    const existente = await RegistroSemanal.findOne({
+      where: {
+        paciente_id: req.body.paciente_id,
+        semana_inicio: req.body.semana_inicio
+      },
+      order: [['id', 'ASC']]
+    });
+
+    if (existente) {
+      await existente.update({
+        ...normalizar(req.body),
+        aplica_farmacos: existente.aplica_farmacos,
+        generado_automaticamente: false
+      });
+      const completoExistente = await RegistroSemanal.findByPk(existente.id, { include: includePaciente });
+      return res.json(completoExistente);
+    }
+
+    const registro = await RegistroSemanal.create({
+      ...normalizar(req.body),
+      aplica_farmacos: false,
+      generado_automaticamente: false
+    });
     const completo = await RegistroSemanal.findByPk(registro.id, { include: includePaciente });
     return res.status(201).json(completo);
   } catch (error) {
@@ -73,7 +94,11 @@ const actualizarRegistro = async (req, res, next) => {
     const errorValidacion = validar(payload);
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
 
-    await registro.update(payload);
+    await registro.update({
+      ...payload,
+      aplica_farmacos: registro.aplica_farmacos,
+      generado_automaticamente: false
+    });
     const completo = await RegistroSemanal.findByPk(registro.id, { include: includePaciente });
     return res.json(completo);
   } catch (error) {

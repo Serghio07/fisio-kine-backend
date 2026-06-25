@@ -8,7 +8,7 @@ const normalizarEstado = (estado = 'activo') => {
   if (estado === false) return 'inactivo';
   return estado || 'activo';
 };
-const estadosPermitidos = ['activo', 'inactivo', 'bloqueado'];
+const estadosPermitidos = ['pendiente', 'activo', 'inactivo', 'bloqueado', 'rechazado'];
 
 const listarUsuarios = async (req, res, next) => {
   try {
@@ -40,39 +40,61 @@ const obtenerUsuario = async (req, res, next) => {
   }
 };
 
+const listarProfesionalesActivos = async (req, res, next) => {
+  try {
+    const profesionales = await Usuario.findAll({
+      where: { estado: 'activo', activo: true },
+      attributes: ['id', 'nombre', 'usuario', 'rol'],
+      order: [['rol', 'ASC'], ['nombre', 'ASC']]
+    });
+    return res.json(profesionales);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const crearUsuario = async (req, res, next) => {
   try {
     const nombre = limpiarTexto(req.body.nombre);
     const usuario = limpiarTexto(req.body.usuario);
     const email = limpiarTexto(req.body.email) || null;
+    const telefono = limpiarTexto(req.body.telefono) || null;
     const password = limpiarTexto(req.body.password || req.body.contrasena);
-    const rol = limpiarTexto(req.body.rol) || 'personal';
+    const rol = 'personal';
     const estado = normalizarEstado(req.body.estado);
 
-    if (!nombre || !usuario || !password) {
-      return res.status(400).json({ message: 'nombre, usuario y password son requeridos' });
-    }
-
-    if (rol && !['admin', 'personal'].includes(rol)) {
-      return res.status(400).json({ message: 'rol solo puede ser admin o personal' });
+    if (!nombre || !usuario || !email || !password) {
+      return res.status(400).json({
+        message: 'Nombre, usuario, correo electrónico y contraseña son obligatorios.'
+      });
     }
 
     if (!estadosPermitidos.includes(estado)) {
-      return res.status(400).json({ message: 'estado solo puede ser activo, inactivo o bloqueado' });
+      return res.status(400).json({ message: 'Estado de usuario no válido.' });
     }
 
     const existente = await Usuario.findOne({ where: { usuario } });
     if (existente) {
-      return res.status(409).json({ message: 'El usuario ya existe' });
+      return res.status(409).json({ message: 'El usuario ya está registrado.' });
     }
 
     if (email) {
       const emailExistente = await Usuario.findOne({ where: { email } });
-      if (emailExistente) return res.status(409).json({ message: 'El email ya esta registrado' });
+      if (emailExistente) return res.status(409).json({ message: 'El correo electrónico ya está registrado.' });
     }
 
-    const nuevoUsuario = await Usuario.create({ nombre, usuario, email, password, rol, estado, intentos_fallidos: 0 });
-    return res.status(201).json({ message: 'Usuario creado correctamente', usuario: nuevoUsuario });
+    const nuevoUsuario = await Usuario.create({
+      nombre,
+      usuario,
+      email,
+      telefono,
+      password,
+      rol,
+      estado,
+      activo: estado === 'activo',
+      intentos_fallidos: 0
+    });
+    return res.status(201).json({ message: 'Personal creado correctamente.', usuario: nuevoUsuario });
   } catch (error) {
     return next(error);
   }
@@ -91,6 +113,7 @@ const actualizarUsuario = async (req, res, next) => {
     if (Object.prototype.hasOwnProperty.call(payload, 'nombre')) payload.nombre = limpiarTexto(payload.nombre);
     if (Object.prototype.hasOwnProperty.call(payload, 'usuario')) payload.usuario = limpiarTexto(payload.usuario);
     if (Object.prototype.hasOwnProperty.call(payload, 'email')) payload.email = limpiarTexto(payload.email) || null;
+    if (Object.prototype.hasOwnProperty.call(payload, 'telefono')) payload.telefono = limpiarTexto(payload.telefono) || null;
     if (Object.prototype.hasOwnProperty.call(payload, 'password')) payload.password = limpiarTexto(payload.password);
     if (Object.prototype.hasOwnProperty.call(payload, 'rol')) payload.rol = limpiarTexto(payload.rol);
 
@@ -107,7 +130,7 @@ const actualizarUsuario = async (req, res, next) => {
     if (Object.prototype.hasOwnProperty.call(payload, 'estado')) {
       payload.estado = normalizarEstado(payload.estado);
       if (!estadosPermitidos.includes(payload.estado)) {
-        return res.status(400).json({ message: 'estado solo puede ser activo, inactivo o bloqueado' });
+        return res.status(400).json({ message: 'Estado de usuario no válido.' });
       }
 
       if (String(req.user?.id) === String(usuario.id) && ['inactivo', 'bloqueado'].includes(payload.estado)) {
@@ -116,7 +139,9 @@ const actualizarUsuario = async (req, res, next) => {
 
       if (payload.estado === 'activo') {
         payload.intentos_fallidos = 0;
+        payload.bloqueado_hasta = null;
       }
+      payload.activo = payload.estado === 'activo';
     }
 
     await usuario.update(payload);
@@ -133,15 +158,53 @@ const cambiarEstadoUsuario = async (req, res, next) => {
 
     const estado = normalizarEstado(req.body.estado);
     if (!estadosPermitidos.includes(estado)) {
-      return res.status(400).json({ message: 'estado solo puede ser activo, inactivo o bloqueado' });
+      return res.status(400).json({ message: 'Estado de usuario no válido.' });
     }
 
     if (String(req.user?.id) === String(usuario.id) && ['inactivo', 'bloqueado'].includes(estado)) {
       return res.status(400).json({ message: 'No puedes desactivar o bloquear tu propio usuario' });
     }
 
-    await usuario.update({ estado, intentos_fallidos: estado === 'activo' ? 0 : usuario.intentos_fallidos });
+    await usuario.update({
+      estado,
+      activo: estado === 'activo',
+      intentos_fallidos: estado === 'activo' ? 0 : usuario.intentos_fallidos,
+      bloqueado_hasta: estado === 'activo' ? null : usuario.bloqueado_hasta
+    });
     return res.json({ message: estado === 'activo' ? 'Usuario desbloqueado correctamente' : 'Estado actualizado correctamente', usuario });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const revisarSolicitud = async (req, res, next) => {
+  try {
+    const usuario = await Usuario.findByPk(req.params.id);
+    if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado' });
+    if (!['pendiente', 'rechazado'].includes(usuario.estado)) {
+      return res.status(400).json({ message: 'La cuenta no tiene una solicitud pendiente.' });
+    }
+
+    const decision = req.body.decision;
+    if (!['aprobar', 'rechazar'].includes(decision)) {
+      return res.status(400).json({ message: 'La decisión debe ser aprobar o rechazar.' });
+    }
+
+    const aprobado = decision === 'aprobar';
+    await usuario.update({
+      rol: 'personal',
+      estado: aprobado ? 'activo' : 'rechazado',
+      activo: aprobado,
+      intentos_fallidos: 0,
+      bloqueado_hasta: null
+    });
+
+    return res.json({
+      message: aprobado
+        ? 'Cuenta aprobada correctamente. El usuario ya puede iniciar sesión.'
+        : 'Solicitud rechazada correctamente.',
+      usuario
+    });
   } catch (error) {
     return next(error);
   }
@@ -165,9 +228,11 @@ const eliminarUsuario = async (req, res, next) => {
 
 module.exports = {
   listarUsuarios,
+  listarProfesionalesActivos,
   obtenerUsuario,
   crearUsuario,
   actualizarUsuario,
   cambiarEstadoUsuario,
+  revisarSolicitud,
   eliminarUsuario
 };

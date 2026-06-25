@@ -46,6 +46,7 @@ const pick = (obj, campos) =>
 const validarHistoria = (body) => {
   if (!body.paciente_id) return 'paciente_id es requerido';
   if (!body.fecha_evaluacion) return 'fecha_evaluacion es requerida';
+  if (!body.profesional_cargo) return 'Selecciona el profesional a cargo';
 
   const escalaDolor = body.intervencion_clinica?.escala_dolor;
   if (escalaDolor !== undefined && (escalaDolor < 0 || escalaDolor > 10)) {
