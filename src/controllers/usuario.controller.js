@@ -1,5 +1,6 @@
 const { Usuario } = require('../models');
 const { Op } = require('sequelize');
+const { validarImagen } = require('../utils/imagen');
 
 const atributosPublicos = { exclude: ['password'] };
 const limpiarTexto = (value) => (typeof value === 'string' ? value.trim() : value);
@@ -44,7 +45,7 @@ const listarProfesionalesActivos = async (req, res, next) => {
   try {
     const profesionales = await Usuario.findAll({
       where: { estado: 'activo', activo: true },
-      attributes: ['id', 'nombre', 'usuario', 'rol'],
+      attributes: ['id', 'nombre', 'usuario', 'rol', 'foto'],
       order: [['rol', 'ASC'], ['nombre', 'ASC']]
     });
     return res.json(profesionales);
@@ -59,6 +60,7 @@ const crearUsuario = async (req, res, next) => {
     const usuario = limpiarTexto(req.body.usuario);
     const email = limpiarTexto(req.body.email) || null;
     const telefono = limpiarTexto(req.body.telefono) || null;
+    const foto = req.body.foto || null;
     const password = limpiarTexto(req.body.password || req.body.contrasena);
     const rol = 'personal';
     const estado = normalizarEstado(req.body.estado);
@@ -72,6 +74,9 @@ const crearUsuario = async (req, res, next) => {
     if (!estadosPermitidos.includes(estado)) {
       return res.status(400).json({ message: 'Estado de usuario no válido.' });
     }
+
+    const errorImagen = validarImagen(foto);
+    if (errorImagen) return res.status(400).json({ message: errorImagen });
 
     const existente = await Usuario.findOne({ where: { usuario } });
     if (existente) {
@@ -88,6 +93,7 @@ const crearUsuario = async (req, res, next) => {
       usuario,
       email,
       telefono,
+      foto,
       password,
       rol,
       estado,
@@ -114,6 +120,11 @@ const actualizarUsuario = async (req, res, next) => {
     if (Object.prototype.hasOwnProperty.call(payload, 'usuario')) payload.usuario = limpiarTexto(payload.usuario);
     if (Object.prototype.hasOwnProperty.call(payload, 'email')) payload.email = limpiarTexto(payload.email) || null;
     if (Object.prototype.hasOwnProperty.call(payload, 'telefono')) payload.telefono = limpiarTexto(payload.telefono) || null;
+    if (Object.prototype.hasOwnProperty.call(payload, 'foto')) {
+      payload.foto = payload.foto || null;
+      const errorImagen = validarImagen(payload.foto);
+      if (errorImagen) return res.status(400).json({ message: errorImagen });
+    }
     if (Object.prototype.hasOwnProperty.call(payload, 'password')) payload.password = limpiarTexto(payload.password);
     if (Object.prototype.hasOwnProperty.call(payload, 'rol')) payload.rol = limpiarTexto(payload.rol);
 

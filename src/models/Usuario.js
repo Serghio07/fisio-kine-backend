@@ -10,6 +10,7 @@ const Usuario = sequelize.define(
     usuario: { type: DataTypes.STRING(80), allowNull: false, unique: true },
     email: { type: DataTypes.STRING(120), unique: true, validate: { isEmail: true } },
     telefono: { type: DataTypes.STRING(30), allowNull: true },
+    foto: { type: DataTypes.TEXT, allowNull: true },
     password: { type: DataTypes.STRING(255), allowNull: false },
     rol: {
       type: DataTypes.ENUM('admin', 'personal'),

@@ -12,6 +12,7 @@ const Paciente = sequelize.define(
     edad: DataTypes.INTEGER,
     sexo: { type: DataTypes.ENUM('M', 'F', 'Otro'), validate: { isIn: [['M', 'F', 'Otro']] } },
     telefono: DataTypes.STRING(30),
+    foto: DataTypes.TEXT,
     domicilio: DataTypes.TEXT,
     estado_civil: DataTypes.STRING(50),
     ocupacion: DataTypes.STRING(120),

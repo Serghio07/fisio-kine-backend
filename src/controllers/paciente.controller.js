@@ -1,4 +1,5 @@
 const { HistoriaClinica, Paciente } = require('../models');
+const { validarImagen } = require('../utils/imagen');
 
 const validarPaciente = ({ nombres, sexo }) => {
   if (!nombres) return 'nombres es requerido';
@@ -39,6 +40,8 @@ const crearPaciente = async (req, res, next) => {
   try {
     const errorValidacion = validarPaciente(req.body);
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
+    const errorImagen = validarImagen(req.body.foto);
+    if (errorImagen) return res.status(400).json({ message: errorImagen });
 
     const paciente = await Paciente.create(req.body);
     return res.status(201).json(paciente);
@@ -54,6 +57,8 @@ const actualizarPaciente = async (req, res, next) => {
 
     const errorValidacion = validarPaciente({ ...paciente.toJSON(), ...req.body });
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
+    const errorImagen = validarImagen(req.body.foto);
+    if (errorImagen) return res.status(400).json({ message: errorImagen });
 
     await paciente.update(req.body);
     return res.json(paciente);

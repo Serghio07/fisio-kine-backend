@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { Op } = require('sequelize');
 const { Usuario } = require('../models');
+const { validarImagen } = require('../utils/imagen');
 
 const MAX_INTENTOS_LOGIN = 5;
 const MINUTOS_BLOQUEO = 15;
@@ -92,11 +93,15 @@ const solicitarAcceso = async (req, res, next) => {
     const usuario = normalizarIdentificador(req.body.usuario);
     const email = normalizarIdentificador(req.body.email);
     const telefono = String(req.body.telefono || '').trim() || null;
+    const foto = req.body.foto || null;
     const { password } = req.body;
 
     if (!nombre || !usuario || !email || !password) {
       return res.status(400).json({ message: 'Nombre, usuario, correo electrónico y contraseña son obligatorios.' });
     }
+    const errorImagen = validarImagen(foto);
+    if (errorImagen) return res.status(400).json({ message: errorImagen });
+
     const existente = await Usuario.findOne({
       where: {
         [Op.or]: [
@@ -115,6 +120,7 @@ const solicitarAcceso = async (req, res, next) => {
       usuario,
       email,
       telefono,
+      foto,
       password,
       rol: 'personal',
       estado: 'pendiente',
