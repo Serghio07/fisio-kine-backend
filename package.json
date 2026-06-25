@@ -10,7 +10,8 @@
     "seed:demo": "node src/seeders/demo.js",
     "reset:admin": "node src/seeders/admin.js --reset",
     "sync:sesiones-semanales": "node src/scripts/syncSesionesSemanales.js",
-    "migrate:fotos": "node src/scripts/migrateFotos.js"
+    "migrate:fotos": "node src/scripts/migrateFotos.js",
+    "migrate:datos-paciente": "node src/scripts/migrateDatosPaciente.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

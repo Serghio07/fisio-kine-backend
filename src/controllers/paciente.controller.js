@@ -13,7 +13,7 @@ const listarPacientes = async (req, res, next) => {
       include: [{
         model: HistoriaClinica,
         as: 'historias_clinicas',
-        attributes: ['diagnostico_medico', 'fecha_evaluacion'],
+        attributes: ['diagnostico_medico', 'fecha_evaluacion', 'lugar_fecha_nacimiento', 'peso', 'talla', 'imc'],
         separate: true,
         limit: 1,
         order: [['fecha_evaluacion', 'DESC'], ['id', 'DESC']]
