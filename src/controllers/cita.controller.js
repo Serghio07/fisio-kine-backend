@@ -1,7 +1,10 @@
 const { Op } = require('sequelize');
-const { Cita, ESTADOS_CITA, Paciente, TIPOS_ATENCION } = require('../models');
+const { Cita, ESTADOS_CITA, Paciente, TIPOS_ATENCION, Usuario } = require('../models');
 
-const includePaciente = [{ model: Paciente, as: 'paciente' }];
+const includeCita = [
+  { model: Paciente, as: 'paciente' },
+  { model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre', 'usuario', 'rol', 'foto'] }
+];
 
 const normalizarHora = (value) => {
   if (!value) return value;
@@ -77,7 +80,7 @@ const listarCitas = async (req, res, next) => {
   try {
     const citas = await Cita.findAll({
       where: buildFiltros(req.query),
-      include: includePaciente,
+      include: includeCita,
       order: [['fecha', 'DESC'], ['hora_inicio', 'ASC']]
     });
     return res.json(citas);
@@ -88,7 +91,7 @@ const listarCitas = async (req, res, next) => {
 
 const obtenerCita = async (req, res, next) => {
   try {
-    const cita = await Cita.findByPk(req.params.id, { include: includePaciente });
+    const cita = await Cita.findByPk(req.params.id, { include: includeCita });
     if (!cita) return res.status(404).json({ message: 'Cita no encontrada' });
     return res.json(cita);
   } catch (error) {
@@ -108,8 +111,8 @@ const crearCita = async (req, res, next) => {
     const errorSolapamiento = await validarSolapamiento(payload);
     if (errorSolapamiento) return res.status(409).json({ message: errorSolapamiento });
 
-    const cita = await Cita.create(payload);
-    const citaCompleta = await Cita.findByPk(cita.id, { include: includePaciente });
+    const cita = await Cita.create({ ...payload, usuario_id: req.usuario.id });
+    const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     return res.status(201).json(citaCompleta);
   } catch (error) {
     return next(error);
@@ -132,7 +135,7 @@ const actualizarCita = async (req, res, next) => {
     if (errorSolapamiento) return res.status(409).json({ message: errorSolapamiento });
 
     await cita.update(payload);
-    const citaCompleta = await Cita.findByPk(cita.id, { include: includePaciente });
+    const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     return res.json(citaCompleta);
   } catch (error) {
     return next(error);
@@ -158,7 +161,7 @@ const cambiarEstadoCita = async (req, res, next) => {
     if (!ESTADOS_CITA.includes(req.body.estado)) return res.status(400).json({ message: 'estado no es valido' });
 
     await cita.update({ estado: req.body.estado });
-    const citaCompleta = await Cita.findByPk(cita.id, { include: includePaciente });
+    const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     return res.json(citaCompleta);
   } catch (error) {
     return next(error);
@@ -172,7 +175,7 @@ const listarCitasPaciente = async (req, res, next) => {
 
     const citas = await Cita.findAll({
       where: { paciente_id: req.params.id },
-      include: includePaciente,
+      include: includeCita,
       order: [['fecha', 'DESC'], ['hora_inicio', 'ASC']]
     });
     return res.json(citas);
@@ -185,7 +188,7 @@ const listarCalendario = async (req, res, next) => {
   try {
     const citas = await Cita.findAll({
       where: buildFiltros(req.query),
-      include: includePaciente,
+      include: includeCita,
       order: [['fecha', 'ASC'], ['hora_inicio', 'ASC']]
     });
     return res.json(citas);
@@ -215,7 +218,7 @@ const listarPeriodo = (tipo) => async (req, res, next) => {
     const fechaFin = fin.toISOString().slice(0, 10);
     const citas = await Cita.findAll({
       where: { fecha: { [Op.between]: [fechaInicio, fechaFin] } },
-      include: includePaciente,
+      include: includeCita,
       order: [['fecha', 'ASC'], ['hora_inicio', 'ASC']]
     });
     return res.json(citas);

@@ -9,6 +9,7 @@ const Cita = sequelize.define(
   {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     paciente_id: { type: DataTypes.INTEGER, allowNull: false },
+    usuario_id: DataTypes.INTEGER,
     fecha: { type: DataTypes.DATEONLY, allowNull: false },
     hora_inicio: { type: DataTypes.TIME, allowNull: false },
     hora_fin: DataTypes.TIME,

@@ -1,7 +1,10 @@
-const { Paciente, Sesion, sequelize } = require('../models');
+const { Paciente, Sesion, Usuario, sequelize } = require('../models');
 const { sincronizarSemana } = require('../services/sesionSemanalSync.service');
 
-const includePaciente = [{ model: Paciente, as: 'paciente' }];
+const includeSesion = [
+  { model: Paciente, as: 'paciente' },
+  { model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre', 'usuario', 'rol', 'foto'] }
+];
 
 const normalizarSesion = (body) => {
   const asistencia = body.asistencia || 'pendiente';
@@ -41,7 +44,7 @@ const validarSesion = (body) => {
 
 const listarSesiones = async (req, res, next) => {
   try {
-    const sesiones = await Sesion.findAll({ include: includePaciente, order: [['fecha', 'DESC'], ['id', 'DESC']] });
+    const sesiones = await Sesion.findAll({ include: includeSesion, order: [['fecha', 'DESC'], ['id', 'DESC']] });
     return res.json(sesiones);
   } catch (error) {
     return next(error);
@@ -50,7 +53,7 @@ const listarSesiones = async (req, res, next) => {
 
 const obtenerSesion = async (req, res, next) => {
   try {
-    const sesion = await Sesion.findByPk(req.params.id, { include: includePaciente });
+    const sesion = await Sesion.findByPk(req.params.id, { include: includeSesion });
     if (!sesion) return res.status(404).json({ message: 'Sesion no encontrada' });
     return res.json(sesion);
   } catch (error) {
@@ -79,9 +82,9 @@ const crearSesion = async (req, res, next) => {
       payload.numero_sesion = 1;
     }
 
-    const sesion = await Sesion.create(payload, { transaction });
+    const sesion = await Sesion.create({ ...payload, usuario_id: req.usuario.id }, { transaction });
     await sincronizarSemana(payload.paciente_id, payload.fecha, transaction);
-    const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includePaciente, transaction });
+    const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includeSesion, transaction });
     await transaction.commit();
     return res.status(201).json({
       ...sesionCompleta.toJSON(),
@@ -115,7 +118,7 @@ const actualizarSesion = async (req, res, next) => {
     if (String(origen.paciente_id) !== String(payload.paciente_id) || origen.fecha !== payload.fecha) {
       await sincronizarSemana(payload.paciente_id, payload.fecha, transaction);
     }
-    const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includePaciente, transaction });
+    const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includeSesion, transaction });
     await transaction.commit();
     return res.json({
       ...sesionCompleta.toJSON(),

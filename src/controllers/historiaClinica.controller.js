@@ -43,6 +43,17 @@ const pick = (obj, campos) =>
     return data;
   }, {});
 
+const resolverProfesional = async (req, transaction) => {
+  if (req.usuario.rol !== 'admin') return req.usuario;
+  if (!req.body.usuario_id) return req.usuario;
+
+  const profesional = await Usuario.findOne({
+    where: { id: req.body.usuario_id, estado: 'activo', activo: true },
+    transaction
+  });
+  return profesional || req.usuario;
+};
+
 const validarHistoria = (body) => {
   if (!body.paciente_id) return 'paciente_id es requerido';
   if (!body.fecha_evaluacion) return 'fecha_evaluacion es requerida';
@@ -104,29 +115,39 @@ const crearHistoria = async (req, res, next) => {
   const transaction = await sequelize.transaction();
 
   try {
-    const errorValidacion = validarHistoria(req.body);
+    const profesional = await resolverProfesional(req, transaction);
+    const body = {
+      ...req.body,
+      usuario_id: profesional.id,
+      profesional_cargo: profesional.nombre,
+      evaluacion_final: {
+        ...req.body.evaluacion_final,
+        profesional_cargo: profesional.nombre
+      }
+    };
+    const errorValidacion = validarHistoria(body);
     if (errorValidacion) {
       await transaction.rollback();
       return res.status(400).json({ message: errorValidacion });
     }
 
-    const paciente = await Paciente.findByPk(req.body.paciente_id, { transaction });
+    const paciente = await Paciente.findByPk(body.paciente_id, { transaction });
     if (!paciente) {
       await transaction.rollback();
       return res.status(404).json({ message: 'Paciente no encontrado' });
     }
 
     const historia = await HistoriaClinica.create(
-      { ...pick(req.body, camposHistoria), usuario_id: req.body.usuario_id || req.usuario.id },
+      pick(body, camposHistoria),
       { transaction }
     );
 
-    await crearOActualizarRelacion(AntecedentePersonal, historia.id, req.body.antecedente_personal, transaction);
-    await crearOActualizarRelacion(AntecedenteFamiliar, historia.id, req.body.antecedente_familiar, transaction);
-    await crearOActualizarRelacion(ExamenKinesico, historia.id, req.body.examen_kinesico, transaction);
-    await crearOActualizarRelacion(CondicionActual, historia.id, req.body.condicion_actual, transaction);
-    await crearOActualizarRelacion(IntervencionClinica, historia.id, req.body.intervencion_clinica, transaction);
-    await crearOActualizarRelacion(EvaluacionFinal, historia.id, req.body.evaluacion_final, transaction);
+    await crearOActualizarRelacion(AntecedentePersonal, historia.id, body.antecedente_personal, transaction);
+    await crearOActualizarRelacion(AntecedenteFamiliar, historia.id, body.antecedente_familiar, transaction);
+    await crearOActualizarRelacion(ExamenKinesico, historia.id, body.examen_kinesico, transaction);
+    await crearOActualizarRelacion(CondicionActual, historia.id, body.condicion_actual, transaction);
+    await crearOActualizarRelacion(IntervencionClinica, historia.id, body.intervencion_clinica, transaction);
+    await crearOActualizarRelacion(EvaluacionFinal, historia.id, body.evaluacion_final, transaction);
 
     await transaction.commit();
 
@@ -148,19 +169,29 @@ const actualizarHistoria = async (req, res, next) => {
       return res.status(404).json({ message: 'Historia clinica no encontrada' });
     }
 
-    const errorValidacion = validarHistoria({ ...historia.toJSON(), ...req.body });
+    const profesional = await resolverProfesional(req, transaction);
+    const body = {
+      ...req.body,
+      usuario_id: profesional.id,
+      profesional_cargo: profesional.nombre,
+      evaluacion_final: {
+        ...req.body.evaluacion_final,
+        profesional_cargo: profesional.nombre
+      }
+    };
+    const errorValidacion = validarHistoria({ ...historia.toJSON(), ...body });
     if (errorValidacion) {
       await transaction.rollback();
       return res.status(400).json({ message: errorValidacion });
     }
 
-    await historia.update(pick(req.body, camposHistoria), { transaction });
-    await crearOActualizarRelacion(AntecedentePersonal, historia.id, req.body.antecedente_personal, transaction);
-    await crearOActualizarRelacion(AntecedenteFamiliar, historia.id, req.body.antecedente_familiar, transaction);
-    await crearOActualizarRelacion(ExamenKinesico, historia.id, req.body.examen_kinesico, transaction);
-    await crearOActualizarRelacion(CondicionActual, historia.id, req.body.condicion_actual, transaction);
-    await crearOActualizarRelacion(IntervencionClinica, historia.id, req.body.intervencion_clinica, transaction);
-    await crearOActualizarRelacion(EvaluacionFinal, historia.id, req.body.evaluacion_final, transaction);
+    await historia.update(pick(body, camposHistoria), { transaction });
+    await crearOActualizarRelacion(AntecedentePersonal, historia.id, body.antecedente_personal, transaction);
+    await crearOActualizarRelacion(AntecedenteFamiliar, historia.id, body.antecedente_familiar, transaction);
+    await crearOActualizarRelacion(ExamenKinesico, historia.id, body.examen_kinesico, transaction);
+    await crearOActualizarRelacion(CondicionActual, historia.id, body.condicion_actual, transaction);
+    await crearOActualizarRelacion(IntervencionClinica, historia.id, body.intervencion_clinica, transaction);
+    await crearOActualizarRelacion(EvaluacionFinal, historia.id, body.evaluacion_final, transaction);
 
     await transaction.commit();
 

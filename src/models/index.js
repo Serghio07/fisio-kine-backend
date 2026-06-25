@@ -41,6 +41,8 @@ EvaluacionFinal.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id' }
 
 Paciente.hasMany(Sesion, { foreignKey: 'paciente_id', as: 'sesiones', onDelete: 'CASCADE' });
 Sesion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+Usuario.hasMany(Sesion, { foreignKey: 'usuario_id', as: 'sesiones_registradas', onDelete: 'SET NULL' });
+Sesion.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'registrado_por' });
 
 Paciente.hasMany(InformeMedico, { foreignKey: 'paciente_id', as: 'informes_medicos', onDelete: 'CASCADE' });
 InformeMedico.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -59,6 +61,8 @@ PlanillaSesion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' }
 
 Paciente.hasMany(Cita, { foreignKey: 'paciente_id', as: 'citas', onDelete: 'RESTRICT' });
 Cita.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+Usuario.hasMany(Cita, { foreignKey: 'usuario_id', as: 'citas_registradas', onDelete: 'SET NULL' });
+Cita.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'registrado_por' });
 
 module.exports = {
   sequelize,
