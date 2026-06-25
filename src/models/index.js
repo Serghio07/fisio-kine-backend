@@ -17,6 +17,7 @@ const { Cita, ESTADOS_CITA, TIPOS_ATENCION } = require('./Cita');
 const Personal = require('./Personal');
 const PlanillaPersonal = require('./PlanillaPersonal');
 const PlanillaPersonalDetalle = require('./PlanillaPersonalDetalle');
+const TareaPersonal = require('./TareaPersonal');
 
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -78,6 +79,13 @@ PlanillaPersonalDetalle.belongsTo(PlanillaPersonal, { foreignKey: 'planilla_id',
 Personal.hasMany(PlanillaPersonalDetalle, { foreignKey: 'personal_id', as: 'detalles_planilla', onDelete: 'SET NULL' });
 PlanillaPersonalDetalle.belongsTo(Personal, { foreignKey: 'personal_id', as: 'personal' });
 
+Personal.hasMany(TareaPersonal, { foreignKey: 'personal_id', as: 'tareas', onDelete: 'CASCADE' });
+TareaPersonal.belongsTo(Personal, { foreignKey: 'personal_id', as: 'personal' });
+Usuario.hasMany(TareaPersonal, { foreignKey: 'usuario_id', as: 'tareas_creadas', onDelete: 'SET NULL' });
+TareaPersonal.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'creado_por' });
+Usuario.hasMany(TareaPersonal, { foreignKey: 'asignado_usuario_id', as: 'tareas_asignadas', onDelete: 'CASCADE' });
+TareaPersonal.belongsTo(Usuario, { foreignKey: 'asignado_usuario_id', as: 'asignado_a' });
+
 module.exports = {
   sequelize,
   Usuario,
@@ -99,5 +107,6 @@ module.exports = {
   TIPOS_ATENCION,
   Personal,
   PlanillaPersonal,
-  PlanillaPersonalDetalle
+  PlanillaPersonalDetalle,
+  TareaPersonal
 };

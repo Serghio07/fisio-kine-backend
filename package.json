@@ -13,7 +13,8 @@
     "migrate:fotos": "node src/scripts/migrateFotos.js",
     "migrate:datos-paciente": "node src/scripts/migrateDatosPaciente.js",
     "migrate:registro-usuarios": "node src/scripts/migrateRegistroUsuarios.js",
-    "migrate:personal-planillas": "node src/scripts/migratePersonalPlanillas.js"
+    "migrate:personal-planillas": "node src/scripts/migratePersonalPlanillas.js",
+    "migrate:tareas-personal": "node src/scripts/migrateTareasPersonal.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
