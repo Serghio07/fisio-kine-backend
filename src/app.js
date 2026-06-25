@@ -14,6 +14,8 @@ const planillaAtencionRoutes = require('./routes/planillaAtencion.routes');
 const planillaSesionRoutes = require('./routes/planillaSesion.routes');
 const citaRoutes = require('./routes/cita.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
+const personalRoutes = require('./routes/personal.routes');
+const planillaPersonalRoutes = require('./routes/planillaPersonal.routes');
 
 const app = express();
 
@@ -38,6 +40,8 @@ app.use('/api/planillas-atencion', planillaAtencionRoutes);
 app.use('/api/planilla-sesiones', planillaSesionRoutes);
 app.use('/api/citas', citaRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/personal', personalRoutes);
+app.use('/api/planillas-personal', planillaPersonalRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

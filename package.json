@@ -12,7 +12,8 @@
     "sync:sesiones-semanales": "node src/scripts/syncSesionesSemanales.js",
     "migrate:fotos": "node src/scripts/migrateFotos.js",
     "migrate:datos-paciente": "node src/scripts/migrateDatosPaciente.js",
-    "migrate:registro-usuarios": "node src/scripts/migrateRegistroUsuarios.js"
+    "migrate:registro-usuarios": "node src/scripts/migrateRegistroUsuarios.js",
+    "migrate:personal-planillas": "node src/scripts/migratePersonalPlanillas.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
