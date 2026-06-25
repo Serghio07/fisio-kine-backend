@@ -85,6 +85,8 @@ Usuario.hasMany(TareaPersonal, { foreignKey: 'usuario_id', as: 'tareas_creadas',
 TareaPersonal.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'creado_por' });
 Usuario.hasMany(TareaPersonal, { foreignKey: 'asignado_usuario_id', as: 'tareas_asignadas', onDelete: 'CASCADE' });
 TareaPersonal.belongsTo(Usuario, { foreignKey: 'asignado_usuario_id', as: 'asignado_a' });
+Paciente.hasMany(TareaPersonal, { foreignKey: 'paciente_id', as: 'tareas_extra', onDelete: 'CASCADE' });
+TareaPersonal.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
 
 module.exports = {
   sequelize,

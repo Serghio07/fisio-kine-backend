@@ -4,7 +4,8 @@ const sequelize = require('../config/database');
 const TareaPersonal = sequelize.define('TareaPersonal', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   personal_id: DataTypes.INTEGER,
-  asignado_usuario_id: { type: DataTypes.INTEGER, allowNull: false },
+  asignado_usuario_id: DataTypes.INTEGER,
+  paciente_id: { type: DataTypes.INTEGER, allowNull: false },
   usuario_id: DataTypes.INTEGER,
   titulo: { type: DataTypes.STRING(180), allowNull: false },
   descripcion: DataTypes.TEXT,

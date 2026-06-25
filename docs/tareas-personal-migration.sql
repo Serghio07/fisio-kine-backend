@@ -1,7 +1,8 @@
 CREATE TABLE IF NOT EXISTS tareas_personal (
   id SERIAL PRIMARY KEY,
   personal_id INTEGER REFERENCES personal(id) ON DELETE SET NULL,
-  asignado_usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  asignado_usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  paciente_id INTEGER NOT NULL REFERENCES pacientes(id) ON DELETE CASCADE,
   usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
   titulo VARCHAR(180) NOT NULL,
   descripcion TEXT,

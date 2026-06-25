@@ -1,8 +1,9 @@
-const { Personal, TareaPersonal, Usuario } = require('../models');
+const { Paciente, Personal, TareaPersonal, Usuario } = require('../models');
 
 const include = [
   { model: Personal, as: 'personal', attributes: ['id', 'nombres', 'apellido_paterno', 'apellido_materno', 'cargo'] },
   { model: Usuario, as: 'asignado_a', attributes: ['id', 'nombre', 'usuario', 'estado'] },
+  { model: Paciente, as: 'paciente', attributes: ['id', 'nombres', 'apellidos', 'ci'] },
   { model: Usuario, as: 'creado_por', attributes: ['id', 'nombre', 'usuario'] }
 ];
 const estados = ['pendiente', 'en_progreso', 'completada', 'cancelada'];
@@ -10,7 +11,8 @@ const prioridades = ['baja', 'media', 'alta'];
 
 const payload = (body) => ({
   personal_id: body.personal_id || null,
-  asignado_usuario_id: body.asignado_usuario_id,
+  asignado_usuario_id: null,
+  paciente_id: body.paciente_id,
   titulo: String(body.titulo || '').trim(),
   descripcion: String(body.descripcion || '').trim() || null,
   fecha: body.fecha,
@@ -20,7 +22,7 @@ const payload = (body) => ({
 });
 
 const validar = (data) => {
-  if (!data.asignado_usuario_id || !data.titulo || !data.fecha) return 'Personal, titulo y fecha son obligatorios.';
+  if (!data.paciente_id || !data.titulo || !data.fecha) return 'Paciente, titulo y fecha son obligatorios.';
   if (!estados.includes(data.estado)) return 'Estado no valido.';
   if (!prioridades.includes(data.prioridad)) return 'Prioridad no valida.';
   return null;
@@ -41,9 +43,8 @@ const crear = async (req, res, next) => {
     const data = payload(req.body);
     const error = validar(data);
     if (error) return res.status(400).json({ message: error });
-    const asignado = await Usuario.findOne({ where: { id: data.asignado_usuario_id, estado: 'activo', activo: true } });
-    if (!asignado) return res.status(404).json({ message: 'Usuario de personal no encontrado o inactivo.' });
-    const ficha = await Personal.findOne({ where: { usuario_id: asignado.id } });
+    if (!await Paciente.findByPk(data.paciente_id)) return res.status(404).json({ message: 'Paciente no encontrado.' });
+    const ficha = await Personal.findOne({ where: { usuario_id: req.usuario.id } });
     data.personal_id = ficha?.id || null;
     const tarea = await TareaPersonal.create({ ...data, usuario_id: req.usuario.id });
     return res.status(201).json(await TareaPersonal.findByPk(tarea.id, { include }));
@@ -57,6 +58,9 @@ const actualizar = async (req, res, next) => {
     const data = payload({ ...tarea.toJSON(), ...req.body });
     const error = validar(data);
     if (error) return res.status(400).json({ message: error });
+    if (!await Paciente.findByPk(data.paciente_id)) return res.status(404).json({ message: 'Paciente no encontrado.' });
+    const ficha = await Personal.findOne({ where: { usuario_id: tarea.usuario_id } });
+    data.personal_id = ficha?.id || null;
     await tarea.update(data);
     return res.json(await TareaPersonal.findByPk(tarea.id, { include }));
   } catch (error) { return next(error); }
