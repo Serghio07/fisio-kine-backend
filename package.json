@@ -8,13 +8,15 @@
     "dev": "nodemon src/server.js",
     "seed:admin": "node src/seeders/admin.js",
     "seed:demo": "node src/seeders/demo.js",
+    "clear:demo": "node src/scripts/clearDemoData.js",
     "reset:admin": "node src/seeders/admin.js --reset",
     "sync:sesiones-semanales": "node src/scripts/syncSesionesSemanales.js",
     "migrate:fotos": "node src/scripts/migrateFotos.js",
     "migrate:datos-paciente": "node src/scripts/migrateDatosPaciente.js",
     "migrate:registro-usuarios": "node src/scripts/migrateRegistroUsuarios.js",
     "migrate:personal-planillas": "node src/scripts/migratePersonalPlanillas.js",
-    "migrate:tareas-personal": "node src/scripts/migrateTareasPersonal.js"
+    "migrate:tareas-personal": "node src/scripts/migrateTareasPersonal.js",
+    "migrate:documentos": "node src/scripts/migrateDocumentosClinicos.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

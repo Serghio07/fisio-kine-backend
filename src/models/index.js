@@ -18,6 +18,8 @@ const Personal = require('./Personal');
 const PlanillaPersonal = require('./PlanillaPersonal');
 const PlanillaPersonalDetalle = require('./PlanillaPersonalDetalle');
 const TareaPersonal = require('./TareaPersonal');
+const DocumentoClinico = require('./DocumentoClinico');
+const PagoClinico = require('./PagoClinico');
 
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -88,6 +90,22 @@ TareaPersonal.belongsTo(Usuario, { foreignKey: 'asignado_usuario_id', as: 'asign
 Paciente.hasMany(TareaPersonal, { foreignKey: 'paciente_id', as: 'tareas_extra', onDelete: 'CASCADE' });
 TareaPersonal.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
 
+Paciente.hasMany(DocumentoClinico, { foreignKey: 'paciente_id', as: 'documentos_clinicos', onDelete: 'CASCADE' });
+DocumentoClinico.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+Usuario.hasMany(DocumentoClinico, { foreignKey: 'usuario_id', as: 'documentos_creados', onDelete: 'SET NULL' });
+DocumentoClinico.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'creado_por' });
+Usuario.hasMany(DocumentoClinico, { foreignKey: 'usuario_modificacion_id', as: 'documentos_modificados', onDelete: 'SET NULL' });
+DocumentoClinico.belongsTo(Usuario, { foreignKey: 'usuario_modificacion_id', as: 'modificado_por' });
+Sesion.hasMany(DocumentoClinico, { foreignKey: 'sesion_id', as: 'documentos_clinicos', onDelete: 'SET NULL' });
+DocumentoClinico.belongsTo(Sesion, { foreignKey: 'sesion_id', as: 'sesion' });
+
+Paciente.hasMany(PagoClinico, { foreignKey: 'paciente_id', as: 'pagos_clinicos', onDelete: 'CASCADE' });
+PagoClinico.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+DocumentoClinico.hasOne(PagoClinico, { foreignKey: 'documento_id', as: 'pago', onDelete: 'CASCADE' });
+PagoClinico.belongsTo(DocumentoClinico, { foreignKey: 'documento_id', as: 'documento' });
+Usuario.hasMany(PagoClinico, { foreignKey: 'usuario_id', as: 'pagos_clinicos', onDelete: 'SET NULL' });
+PagoClinico.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'registrado_por' });
+
 module.exports = {
   sequelize,
   Usuario,
@@ -110,5 +128,7 @@ module.exports = {
   Personal,
   PlanillaPersonal,
   PlanillaPersonalDetalle,
-  TareaPersonal
+  TareaPersonal,
+  DocumentoClinico,
+  PagoClinico
 };

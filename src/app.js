@@ -17,6 +17,7 @@ const dashboardRoutes = require('./routes/dashboard.routes');
 const personalRoutes = require('./routes/personal.routes');
 const planillaPersonalRoutes = require('./routes/planillaPersonal.routes');
 const tareaPersonalRoutes = require('./routes/tareaPersonal.routes');
+const documentoClinicoRoutes = require('./routes/documentoClinico.routes');
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/personal', personalRoutes);
 app.use('/api/planillas-personal', planillaPersonalRoutes);
 app.use('/api/tareas-personal', tareaPersonalRoutes);
+app.use('/api/documentos-clinicos', documentoClinicoRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });
