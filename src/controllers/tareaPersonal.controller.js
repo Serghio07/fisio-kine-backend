@@ -4,7 +4,12 @@ const include = [
   { model: Personal, as: 'personal', attributes: ['id', 'nombres', 'apellido_paterno', 'apellido_materno', 'cargo'] },
   { model: Usuario, as: 'asignado_a', attributes: ['id', 'nombre', 'usuario', 'estado'] },
   { model: Paciente, as: 'paciente', attributes: ['id', 'nombres', 'apellidos', 'ci'] },
-  { model: Usuario, as: 'creado_por', attributes: ['id', 'nombre', 'usuario'] }
+  {
+    model: Usuario,
+    as: 'creado_por',
+    attributes: ['id', 'nombre', 'usuario'],
+    include: [{ model: Personal, as: 'ficha_personal' }]
+  }
 ];
 const estados = ['pendiente', 'en_progreso', 'completada', 'cancelada'];
 const prioridades = ['baja', 'media', 'alta'];
@@ -55,6 +60,9 @@ const actualizar = async (req, res, next) => {
   try {
     const tarea = await TareaPersonal.findByPk(req.params.id);
     if (!tarea) return res.status(404).json({ message: 'Tarea no encontrada.' });
+    if (req.usuario.rol !== 'admin' && String(tarea.usuario_id) !== String(req.usuario.id)) {
+      return res.status(403).json({ message: 'Solo puedes editar tus propias tareas.' });
+    }
     const data = payload({ ...tarea.toJSON(), ...req.body });
     const error = validar(data);
     if (error) return res.status(400).json({ message: error });
@@ -71,6 +79,9 @@ const cambiarEstado = async (req, res, next) => {
     if (!estados.includes(req.body.estado)) return res.status(400).json({ message: 'Estado no valido.' });
     const tarea = await TareaPersonal.findByPk(req.params.id);
     if (!tarea) return res.status(404).json({ message: 'Tarea no encontrada.' });
+    if (req.usuario.rol !== 'admin' && String(tarea.usuario_id) !== String(req.usuario.id)) {
+      return res.status(403).json({ message: 'Solo puedes cambiar tus propias tareas.' });
+    }
     await tarea.update({ estado: req.body.estado });
     return res.json(await TareaPersonal.findByPk(tarea.id, { include }));
   } catch (error) { return next(error); }
@@ -80,6 +91,9 @@ const eliminar = async (req, res, next) => {
   try {
     const tarea = await TareaPersonal.findByPk(req.params.id);
     if (!tarea) return res.status(404).json({ message: 'Tarea no encontrada.' });
+    if (req.usuario.rol !== 'admin' && String(tarea.usuario_id) !== String(req.usuario.id)) {
+      return res.status(403).json({ message: 'Solo puedes eliminar tus propias tareas.' });
+    }
     await tarea.destroy();
     return res.json({ message: 'Tarea eliminada correctamente.' });
   } catch (error) { return next(error); }

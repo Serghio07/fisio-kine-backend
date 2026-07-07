@@ -18,14 +18,28 @@ const personalRoutes = require('./routes/personal.routes');
 const planillaPersonalRoutes = require('./routes/planillaPersonal.routes');
 const tareaPersonalRoutes = require('./routes/tareaPersonal.routes');
 const documentoClinicoRoutes = require('./routes/documentoClinico.routes');
+const actividadRoutes = require('./routes/actividad.routes');
+const registrarActividad = require('./middlewares/actividad.middleware');
 
 const app = express();
 
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(helmet());
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Origen no permitido por CORS'));
+  },
+  credentials: true
+}));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(morgan('dev'));
+app.use(registrarActividad);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'Physio Active API' });
@@ -46,6 +60,7 @@ app.use('/api/personal', personalRoutes);
 app.use('/api/planillas-personal', planillaPersonalRoutes);
 app.use('/api/tareas-personal', tareaPersonalRoutes);
 app.use('/api/documentos-clinicos', documentoClinicoRoutes);
+app.use('/api/actividades', actividadRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

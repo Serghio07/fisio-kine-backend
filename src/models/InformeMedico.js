@@ -6,6 +6,7 @@ const InformeMedico = sequelize.define(
   {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     paciente_id: { type: DataTypes.INTEGER, allowNull: false },
+    historia_clinica_id: { type: DataTypes.INTEGER, allowNull: false },
     fecha: { type: DataTypes.DATEONLY, allowNull: false },
     doctor: DataTypes.STRING(150),
     diagnostico: { type: DataTypes.TEXT, allowNull: false },

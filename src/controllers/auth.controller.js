@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { Op } = require('sequelize');
-const { Usuario } = require('../models');
+const { Usuario, Personal } = require('../models');
 const { validarImagen } = require('../utils/imagen');
+const { validarPasswordSegura } = require('../utils/password');
 
 const MAX_INTENTOS_LOGIN = 5;
 const MINUTOS_BLOQUEO = 15;
@@ -22,7 +23,8 @@ const login = async (req, res, next) => {
           { usuario: { [Op.iLike]: identificador } },
           { email: { [Op.iLike]: identificador } }
         ]
-      }
+      },
+      include: [{ model: Personal, as: 'ficha_personal' }]
     });
     if (!usuarioDb) {
       return res.status(401).json({ message: 'Credenciales incorrectas.' });
@@ -77,11 +79,20 @@ const login = async (req, res, next) => {
 
     const token = jwt.sign(
       { id: usuarioDb.id, usuario: usuarioDb.usuario, rol: usuarioDb.rol, estado: usuarioDb.estado },
-      process.env.JWT_SECRET || 'dev_secret',
-      { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '2h', algorithm: 'HS256' }
     );
 
-    return res.json({ message: 'Inicio de sesión exitoso.', token, usuario: usuarioDb });
+    res.cookie('physio_session', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 2 * 60 * 60 * 1000,
+      path: '/'
+    });
+    const usuarioSeguro = usuarioDb.toJSON();
+    delete usuarioSeguro.password;
+    return res.json({ message: 'Inicio de sesión exitoso.', usuario: usuarioSeguro });
   } catch (error) {
     return next(error);
   }
@@ -99,6 +110,8 @@ const solicitarAcceso = async (req, res, next) => {
     if (!nombre || !usuario || !email || !password) {
       return res.status(400).json({ message: 'Nombre, usuario, correo electrónico y contraseña son obligatorios.' });
     }
+    const errorPassword = validarPasswordSegura(password);
+    if (errorPassword) return res.status(400).json({ message: errorPassword });
     const errorImagen = validarImagen(foto);
     if (errorImagen) return res.status(400).json({ message: errorImagen });
 
@@ -137,4 +150,14 @@ const solicitarAcceso = async (req, res, next) => {
   }
 };
 
-module.exports = { login, solicitarAcceso };
+const logout = (req, res) => {
+  res.clearCookie('physio_session', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/'
+  });
+  return res.json({ message: 'Sesión cerrada correctamente.' });
+};
+
+module.exports = { login, logout, solicitarAcceso };

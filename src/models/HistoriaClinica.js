@@ -16,7 +16,15 @@ const HistoriaClinica = sequelize.define(
     motivo_consulta: DataTypes.TEXT,
     enfermedad_actual: DataTypes.TEXT,
     profesional_cargo: DataTypes.STRING(150),
-    estado: { type: DataTypes.ENUM('activa', 'cerrada', 'anulada'), defaultValue: 'activa' }
+    evolutivo: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    anulada: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    anulada_en: DataTypes.DATE,
+    anulada_por: DataTypes.STRING(150),
+    motivo_anulacion: DataTypes.STRING(120),
+    observacion_anulacion: DataTypes.TEXT,
+    restaurada_en: DataTypes.DATE,
+    restaurada_por: DataTypes.STRING(150),
+    estado: { type: DataTypes.STRING(10), defaultValue: 'borrador', validate: { isIn: [['borrador', 'activa', 'anulada']] } }
   },
   { tableName: 'historias_clinicas' }
 );

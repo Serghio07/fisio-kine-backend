@@ -1,9 +1,8 @@
 const router = require('express').Router();
 const autenticar = require('../middlewares/auth.middleware');
-const autorizarRoles = require('../middlewares/role.middleware');
 const controller = require('../controllers/tareaPersonal.controller');
 
-router.use(autenticar, autorizarRoles('admin'));
+router.use(autenticar);
 router.get('/', controller.listar);
 router.post('/', controller.crear);
 router.put('/:id', controller.actualizar);

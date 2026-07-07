@@ -16,6 +16,9 @@
     "migrate:registro-usuarios": "node src/scripts/migrateRegistroUsuarios.js",
     "migrate:personal-planillas": "node src/scripts/migratePersonalPlanillas.js",
     "migrate:tareas-personal": "node src/scripts/migrateTareasPersonal.js",
+    "migrate:titulo-profesional": "node src/scripts/migrateTituloProfesional.js",
+    "migrate:actividades": "node src/scripts/migrateActividadesSistema.js",
+    "migrate:evolutivo": "node src/scripts/migrateEvolutivoHistoria.js",
     "migrate:documentos": "node src/scripts/migrateDocumentosClinicos.js"
   },
   "dependencies": {

@@ -1,0 +1,12 @@
+ALTER TABLE historias_clinicas
+  ADD COLUMN IF NOT EXISTS anulada BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS anulada_en TIMESTAMP WITH TIME ZONE,
+  ADD COLUMN IF NOT EXISTS anulada_por VARCHAR(150),
+  ADD COLUMN IF NOT EXISTS motivo_anulacion VARCHAR(120),
+  ADD COLUMN IF NOT EXISTS observacion_anulacion TEXT,
+  ADD COLUMN IF NOT EXISTS restaurada_en TIMESTAMP WITH TIME ZONE,
+  ADD COLUMN IF NOT EXISTS restaurada_por VARCHAR(150);
+
+UPDATE historias_clinicas
+SET anulada = TRUE
+WHERE estado = 'anulada';

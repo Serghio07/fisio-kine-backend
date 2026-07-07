@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS informes_medicos (
     id SERIAL PRIMARY KEY,
     paciente_id INT NOT NULL REFERENCES pacientes(id) ON DELETE CASCADE,
+    historia_clinica_id INT NOT NULL REFERENCES historias_clinicas(id) ON DELETE RESTRICT,
     fecha DATE NOT NULL,
     doctor VARCHAR(150),
     diagnostico TEXT NOT NULL,
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS informes_medicos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_informes_medicos_paciente ON informes_medicos(paciente_id);
+CREATE INDEX IF NOT EXISTS idx_informes_medicos_historia ON informes_medicos(historia_clinica_id);
 CREATE INDEX IF NOT EXISTS idx_informes_medicos_fecha ON informes_medicos(fecha);
 
 CREATE OR REPLACE FUNCTION actualizar_updated_at()

@@ -1,9 +1,18 @@
 const { Op } = require('sequelize');
-const { Cita, ESTADOS_CITA, Paciente, TIPOS_ATENCION, Usuario } = require('../models');
+const { Cita, ESTADOS_CITA, Paciente, Personal, TIPOS_ATENCION, Usuario } = require('../models');
 
 const includeCita = [
   { model: Paciente, as: 'paciente' },
-  { model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre', 'usuario', 'rol', 'foto'] }
+  {
+    model: Usuario,
+    as: 'registrado_por',
+    attributes: ['id', 'nombre', 'usuario', 'rol', 'foto'],
+    include: [{
+      model: Personal,
+      as: 'ficha_personal',
+      attributes: ['titulo_profesional', 'cargo', 'nombres', 'apellido_paterno', 'apellido_materno']
+    }]
+  }
 ];
 
 const normalizarHora = (value) => {

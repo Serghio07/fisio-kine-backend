@@ -1,6 +1,7 @@
 const { Personal, Usuario, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const { validarImagen } = require('../utils/imagen');
+const { validarPasswordSegura } = require('../utils/password');
 
 const atributosPublicos = { exclude: ['password'] };
 const limpiarTexto = (value) => (typeof value === 'string' ? value.trim() : value);
@@ -12,7 +13,7 @@ const normalizarEstado = (estado = 'activo') => {
 const estadosPermitidos = ['pendiente', 'activo', 'inactivo', 'bloqueado', 'rechazado'];
 const includeFichaPersonal = [{ model: Personal, as: 'ficha_personal' }];
 const camposLaborales = [
-  'apellido_paterno', 'apellido_materno', 'nombres', 'ci', 'cargo', 'dias_trabajo',
+  'apellido_paterno', 'apellido_materno', 'nombres', 'ci', 'titulo_profesional', 'cargo', 'dias_trabajo',
   'hora_entrada', 'hora_salida', 'sueldo_base', 'tipo_pago', 'direccion',
   'fecha_ingreso', 'observaciones'
 ];
@@ -21,6 +22,7 @@ const datosLaborales = (body, estadoUsuario = 'activo') => ({
   apellido_materno: limpiarTexto(body.apellido_materno) || null,
   nombres: limpiarTexto(body.nombres),
   ci: limpiarTexto(body.ci),
+  titulo_profesional: limpiarTexto(body.titulo_profesional) || null,
   cargo: limpiarTexto(body.cargo),
   dias_trabajo: Array.isArray(body.dias_trabajo) ? body.dias_trabajo : [],
   hora_entrada: body.hora_entrada || null,
@@ -39,6 +41,9 @@ const validarDatosLaborales = (data) => {
   }
   if (!data.dias_trabajo.length || !data.hora_entrada || !data.hora_salida) {
     return 'Selecciona los dias de trabajo y registra la hora de entrada y salida.';
+  }
+  if (data.titulo_profesional && !['Doc.', 'Dr.', 'Dra.', 'Lic.', 'Sr.', 'Sra.'].includes(data.titulo_profesional)) {
+    return 'Titulo profesional no valido.';
   }
   if (data.hora_salida <= data.hora_entrada) return 'La hora de salida debe ser posterior a la hora de entrada.';
   if (!['mensual', 'por_servicio'].includes(data.tipo_pago)) return 'Tipo de pago no valido.';
@@ -81,9 +86,16 @@ const listarProfesionalesActivos = async (req, res, next) => {
     const profesionales = await Usuario.findAll({
       where: { estado: 'activo', activo: true },
       attributes: ['id', 'nombre', 'usuario', 'rol', 'foto'],
+      include: includeFichaPersonal,
       order: [['rol', 'ASC'], ['nombre', 'ASC']]
     });
-    return res.json(profesionales);
+    return res.json(profesionales.map((profesional) => {
+      const data = profesional.toJSON();
+      return {
+        ...data,
+        nombre_mostrado: data.ficha_personal?.nombre_mostrado || data.nombre
+      };
+    }));
   } catch (error) {
     return next(error);
   }
@@ -105,6 +117,8 @@ const crearUsuarioAnterior = async (req, res, next) => {
         message: 'Nombre, usuario, correo electrónico y contraseña son obligatorios.'
       });
     }
+    const errorPassword = validarPasswordSegura(password);
+    if (errorPassword) return res.status(400).json({ message: errorPassword });
 
     if (!estadosPermitidos.includes(estado)) {
       return res.status(400).json({ message: 'Estado de usuario no válido.' });
@@ -160,7 +174,11 @@ const actualizarUsuarioAnterior = async (req, res, next) => {
       const errorImagen = validarImagen(payload.foto);
       if (errorImagen) return res.status(400).json({ message: errorImagen });
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'password')) payload.password = limpiarTexto(payload.password);
+    if (Object.prototype.hasOwnProperty.call(payload, 'password')) {
+      payload.password = limpiarTexto(payload.password);
+      const errorPassword = validarPasswordSegura(payload.password);
+      if (errorPassword) return res.status(400).json({ message: errorPassword });
+    }
     if (Object.prototype.hasOwnProperty.call(payload, 'rol')) payload.rol = limpiarTexto(payload.rol);
 
     if (payload.email) {
@@ -298,6 +316,11 @@ const crearUsuario = async (req, res, next) => {
       await transaction.rollback();
       return res.status(400).json({ message: 'Usuario, correo electronico y contrasena son obligatorios.' });
     }
+    const errorPassword = validarPasswordSegura(password);
+    if (errorPassword) {
+      await transaction.rollback();
+      return res.status(400).json({ message: errorPassword });
+    }
     if (!estadosPermitidos.includes(estado)) {
       await transaction.rollback();
       return res.status(400).json({ message: 'Estado de usuario no valido.' });
@@ -360,6 +383,13 @@ const actualizarUsuario = async (req, res, next) => {
     if (Object.prototype.hasOwnProperty.call(payload, 'password')) {
       payload.password = limpiarTexto(payload.password);
       if (!payload.password) delete payload.password;
+      else {
+        const errorPassword = validarPasswordSegura(payload.password);
+        if (errorPassword) {
+          await transaction.rollback();
+          return res.status(400).json({ message: errorPassword });
+        }
+      }
     }
     if (Object.prototype.hasOwnProperty.call(payload, 'foto')) {
       payload.foto = payload.foto || null;
@@ -394,7 +424,10 @@ const actualizarUsuario = async (req, res, next) => {
       }
     }
 
-    if (usuario.rol === 'personal') {
+    const incluyeDatosLaborales = camposLaborales.some((campo) =>
+      Object.prototype.hasOwnProperty.call(req.body, campo)
+    );
+    if (incluyeDatosLaborales) {
       const laboral = datosLaborales(req.body, payload.estado || usuario.estado);
       const errorLaboral = validarDatosLaborales(laboral);
       if (errorLaboral) {

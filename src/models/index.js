@@ -18,6 +18,7 @@ const Personal = require('./Personal');
 const PlanillaPersonal = require('./PlanillaPersonal');
 const PlanillaPersonalDetalle = require('./PlanillaPersonalDetalle');
 const TareaPersonal = require('./TareaPersonal');
+const ActividadSistema = require('./ActividadSistema');
 const DocumentoClinico = require('./DocumentoClinico');
 const PagoClinico = require('./PagoClinico');
 
@@ -47,11 +48,15 @@ EvaluacionFinal.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id' }
 
 Paciente.hasMany(Sesion, { foreignKey: 'paciente_id', as: 'sesiones', onDelete: 'CASCADE' });
 Sesion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+HistoriaClinica.hasMany(Sesion, { foreignKey: 'historia_clinica_id', as: 'sesiones', onDelete: 'SET NULL' });
+Sesion.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historia_clinica' });
 Usuario.hasMany(Sesion, { foreignKey: 'usuario_id', as: 'sesiones_registradas', onDelete: 'SET NULL' });
 Sesion.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'registrado_por' });
 
 Paciente.hasMany(InformeMedico, { foreignKey: 'paciente_id', as: 'informes_medicos', onDelete: 'CASCADE' });
 InformeMedico.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+HistoriaClinica.hasMany(InformeMedico, { foreignKey: 'historia_clinica_id', as: 'informes_medicos', onDelete: 'RESTRICT' });
+InformeMedico.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historia_clinica' });
 
 Paciente.hasMany(RegistroSemanal, { foreignKey: 'paciente_id', as: 'registros_semanales', onDelete: 'CASCADE' });
 RegistroSemanal.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -89,6 +94,11 @@ Usuario.hasMany(TareaPersonal, { foreignKey: 'asignado_usuario_id', as: 'tareas_
 TareaPersonal.belongsTo(Usuario, { foreignKey: 'asignado_usuario_id', as: 'asignado_a' });
 Paciente.hasMany(TareaPersonal, { foreignKey: 'paciente_id', as: 'tareas_extra', onDelete: 'CASCADE' });
 TareaPersonal.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+
+Usuario.hasMany(ActividadSistema, { foreignKey: 'usuario_id', as: 'actividades', onDelete: 'CASCADE' });
+ActividadSistema.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'usuario' });
+Paciente.hasMany(ActividadSistema, { foreignKey: 'paciente_id', as: 'actividades', onDelete: 'SET NULL' });
+ActividadSistema.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
 
 Paciente.hasMany(DocumentoClinico, { foreignKey: 'paciente_id', as: 'documentos_clinicos', onDelete: 'CASCADE' });
 DocumentoClinico.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -129,6 +139,7 @@ module.exports = {
   PlanillaPersonal,
   PlanillaPersonalDetalle,
   TareaPersonal,
+  ActividadSistema,
   DocumentoClinico,
   PagoClinico
 };

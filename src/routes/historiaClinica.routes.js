@@ -7,7 +7,8 @@ const {
   listarHistoriasPorPaciente,
   crearHistoria,
   actualizarHistoria,
-  eliminarHistoria
+  eliminarHistoria,
+  restaurarHistoria
 } = require('../controllers/historiaClinica.controller');
 
 router.use(autenticar);
@@ -17,6 +18,7 @@ router.get('/paciente/:pacienteId', listarHistoriasPorPaciente);
 router.get('/:id', obtenerHistoria);
 router.post('/', autorizarRoles('admin', 'personal'), crearHistoria);
 router.put('/:id', autorizarRoles('admin', 'personal'), actualizarHistoria);
+router.patch('/:id/restaurar', autorizarRoles('admin'), restaurarHistoria);
 router.delete('/:id', autorizarRoles('admin'), eliminarHistoria);
 
 module.exports = router;

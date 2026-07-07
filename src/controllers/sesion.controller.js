@@ -1,9 +1,24 @@
-const { Paciente, Sesion, Usuario, sequelize } = require('../models');
+const { Op } = require('sequelize');
+const { EvaluacionFinal, HistoriaClinica, Paciente, Personal, Sesion, Usuario, sequelize } = require('../models');
 const { sincronizarSemana } = require('../services/sesionSemanalSync.service');
 
 const includeSesion = [
   { model: Paciente, as: 'paciente' },
-  { model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre', 'usuario', 'rol', 'foto'] }
+  {
+    model: HistoriaClinica,
+    as: 'historia_clinica',
+    include: [{ model: EvaluacionFinal, as: 'evaluacion_final' }]
+  },
+  {
+    model: Usuario,
+    as: 'registrado_por',
+    attributes: ['id', 'nombre', 'usuario', 'rol', 'foto'],
+    include: [{
+      model: Personal,
+      as: 'ficha_personal',
+      attributes: ['titulo_profesional', 'cargo', 'nombres', 'apellido_paterno', 'apellido_materno']
+    }]
+  }
 ];
 
 const normalizarSesion = (body) => {
@@ -12,6 +27,7 @@ const normalizarSesion = (body) => {
 
   return {
     paciente_id: body.paciente_id,
+    historia_clinica_id: body.historia_clinica_id || null,
     fecha: body.fecha,
     sesiones_debe: Number(body.sesiones_debe || 0),
     sesiones_hizo: sesionesHizo,
@@ -27,6 +43,7 @@ const normalizarSesion = (body) => {
 
 const validarSesion = (body) => {
   if (!body.paciente_id) return 'paciente_id es requerido';
+  if (!body.historia_clinica_id) return 'historia_clinica_id es requerido';
   if (!body.fecha) return 'fecha es requerida';
   if (Number(body.sesiones_debe || 0) < 0) return 'sesiones_debe no puede ser negativo';
   if (Number(body.sesiones_hizo || 0) < 0) return 'sesiones_hizo no puede ser negativo';
@@ -40,6 +57,45 @@ const validarSesion = (body) => {
     return 'estado_pago no es válido';
   }
   return null;
+};
+
+const contarSesionesValidas = async (historiaClinicaId, transaction, excludeId = null) => {
+  const where = {
+    historia_clinica_id: historiaClinicaId,
+    asistencia: ['pendiente', 'asistio']
+  };
+  if (excludeId) where.id = { [Op.ne]: excludeId };
+  return Sesion.count({ where, transaction });
+};
+
+const prepararSesionConHistoria = async (payload, transaction, sesionActual = null) => {
+  const historia = await HistoriaClinica.findByPk(payload.historia_clinica_id, {
+    include: [{ model: EvaluacionFinal, as: 'evaluacion_final' }],
+    transaction
+  });
+  if (!historia) return { error: 'Historia clinica no encontrada' };
+  if (String(historia.paciente_id) !== String(payload.paciente_id)) return { error: 'La historia clinica no pertenece al paciente seleccionado' };
+  if (historia.estado === 'anulada' || historia.anulada) return { error: 'No se pueden registrar sesiones en una historia clinica anulada' };
+
+  const contratadas = Number(historia.evaluacion_final?.sesiones_contratadas || 0);
+  if (contratadas <= 0) return { error: 'La historia clinica no tiene sesiones indicadas registradas' };
+
+  const cuentaActual = await contarSesionesValidas(historia.id, transaction, sesionActual?.id);
+  const cuentaEstaSesion = ['pendiente', 'asistio'].includes(payload.asistencia) ? 1 : 0;
+  const realizadas = cuentaActual + cuentaEstaSesion;
+
+  if (cuentaEstaSesion && realizadas > contratadas) {
+    return { error: 'No quedan sesiones restantes para esta historia clinica' };
+  }
+
+  return {
+    payload: {
+      ...payload,
+      sesiones_debe: contratadas,
+      sesiones_hizo: realizadas,
+      numero_sesion: cuentaEstaSesion ? realizadas : Number(payload.numero_sesion || Math.max(cuentaActual, 1))
+    }
+  };
 };
 
 const listarSesiones = async (req, res, next) => {
@@ -76,11 +132,13 @@ const crearSesion = async (req, res, next) => {
       return res.status(404).json({ message: 'Paciente no encontrado' });
     }
 
-    const payload = normalizarSesion(req.body);
-    if (payload.asistencia === 'asistio' && payload.sesiones_hizo === 0) {
-      payload.sesiones_hizo = 1;
-      payload.numero_sesion = 1;
+    const basePayload = normalizarSesion(req.body);
+    const preparado = await prepararSesionConHistoria(basePayload, transaction);
+    if (preparado.error) {
+      await transaction.rollback();
+      return res.status(400).json({ message: preparado.error });
     }
+    const payload = preparado.payload;
 
     const sesion = await Sesion.create({ ...payload, usuario_id: req.usuario.id }, { transaction });
     await sincronizarSemana(payload.paciente_id, payload.fecha, transaction);
@@ -106,7 +164,13 @@ const actualizarSesion = async (req, res, next) => {
     }
     const origen = { paciente_id: sesion.paciente_id, fecha: sesion.fecha };
 
-    const payload = normalizarSesion({ ...sesion.toJSON(), ...req.body });
+    const basePayload = normalizarSesion({ ...sesion.toJSON(), ...req.body });
+    const preparado = await prepararSesionConHistoria(basePayload, transaction, sesion);
+    if (preparado.error) {
+      await transaction.rollback();
+      return res.status(400).json({ message: preparado.error });
+    }
+    const payload = preparado.payload;
     const errorValidacion = validarSesion(payload);
     if (errorValidacion) {
       await transaction.rollback();

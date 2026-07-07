@@ -10,6 +10,13 @@ const parseDateOnly = (value) => {
 
 const formatDateOnly = (date) => date.toISOString().slice(0, 10);
 
+const normalizarSexoRegistro = (sexo) => {
+  const value = String(sexo || '').toLocaleUpperCase('es-BO');
+  if (value === 'MASCULINO' || value === 'M') return 'M';
+  if (value === 'FEMENINO' || value === 'F') return 'F';
+  return sexo ? 'Otro' : null;
+};
+
 const obtenerSemana = (fecha) => {
   const date = parseDateOnly(fecha);
   const day = date.getUTCDay();
@@ -94,7 +101,7 @@ const sincronizarSemana = async (pacienteId, fecha, transaction) => {
       diagnostico: historia?.diagnostico_medico || null,
       telefono: paciente?.telefono || null,
       edad: paciente?.edad ?? null,
-      sexo: paciente?.sexo || null,
+      sexo: normalizarSexoRegistro(paciente?.sexo),
       generado_automaticamente: true
     }, { transaction });
   }
