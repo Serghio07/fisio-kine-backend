@@ -8,6 +8,7 @@ const RegistroSemanal = sequelize.define(
     semana_inicio: { type: DataTypes.DATEONLY, allowNull: false },
     semana_fin: { type: DataTypes.DATEONLY, allowNull: false },
     paciente_id: { type: DataTypes.INTEGER, allowNull: false },
+    historia_clinica_id: DataTypes.INTEGER,
     diagnostico: DataTypes.TEXT,
     telefono: DataTypes.STRING(30),
     edad: DataTypes.INTEGER,

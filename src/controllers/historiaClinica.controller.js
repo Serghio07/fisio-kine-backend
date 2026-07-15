@@ -108,12 +108,12 @@ const resolverProfesional = async (req, transaction) => {
 const nombreProfesional = (profesional) =>
   profesional.ficha_personal?.nombre_mostrado || profesional.nombre;
 
-const validarHistoria = (body) => {
-  if (!body.paciente_id) return 'paciente_id es requerido';
-  if (!body.fecha_evaluacion) return 'fecha_evaluacion es requerida';
-  if (!body.profesional_cargo) return 'Selecciona el profesional a cargo';
+const validarHistoria = (body, partial = false) => {
+  if (!partial && !body.paciente_id) return 'paciente_id es requerido';
+  if (!partial && !body.fecha_evaluacion) return 'fecha_evaluacion es requerida';
+  if (!partial && !body.profesional_cargo) return 'Selecciona el profesional a cargo';
   if (body.evolutivo !== undefined && !Array.isArray(body.evolutivo)) return 'El evolutivo debe ser una lista de sesiones';
-  if (body.estado === 'activa') {
+  if (body.estado === 'activa' && body.evaluacion_final !== undefined) {
     const sesionesContratadas = Number(body.evaluacion_final?.sesiones_contratadas || 0);
     if (!Number.isInteger(sesionesContratadas) || sesionesContratadas <= 0) {
       return 'sesiones_contratadas es requerido y debe ser mayor que cero';
@@ -257,16 +257,19 @@ const actualizarHistoria = async (req, res, next) => {
     }
 
     const profesional = await resolverProfesional(req, transaction);
-    const body = normalizarHistoria({
+    const requestData = {
       ...req.body,
       usuario_id: profesional.id,
-      profesional_cargo: nombreProfesional(profesional),
-      evaluacion_final: {
+      profesional_cargo: nombreProfesional(profesional)
+    };
+    if (req.body.evaluacion_final !== undefined) {
+      requestData.evaluacion_final = {
         ...req.body.evaluacion_final,
         profesional_cargo: nombreProfesional(profesional)
-      }
-    });
-    const errorValidacion = validarHistoria({ ...historia.toJSON(), ...body });
+      };
+    }
+    const body = normalizarHistoria(requestData);
+    const errorValidacion = validarHistoria(body, true);
     if (errorValidacion) {
       await transaction.rollback();
       return res.status(400).json({ message: errorValidacion });

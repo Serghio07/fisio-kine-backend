@@ -21,9 +21,28 @@ const includeSesion = [
   }
 ];
 
+const toMoney = (value) => Math.max(Number(value || 0), 0);
+
+const calcularPago = (body) => {
+  const estadoPago = body.estado_pago || 'Pendiente';
+  const montoSesion = toMoney(body.monto_sesion);
+  let montoPagado = toMoney(body.monto_pagado);
+
+  if (estadoPago === 'Pagado') montoPagado = montoSesion;
+  if (estadoPago === 'Debe') montoPagado = 0;
+  if (estadoPago === 'Pendiente' && !body.monto_pagado) montoPagado = 0;
+
+  return {
+    monto_sesion: montoSesion,
+    monto_pagado: montoPagado,
+    saldo_pendiente: Math.max(montoSesion - montoPagado, 0)
+  };
+};
+
 const normalizarSesion = (body) => {
   const asistencia = body.asistencia || 'pendiente';
   const sesionesHizo = Number(body.sesiones_hizo || 0);
+  const pago = calcularPago(body);
 
   return {
     paciente_id: body.paciente_id,
@@ -35,6 +54,7 @@ const normalizarSesion = (body) => {
     asistencia,
     metodo_pago: body.metodo_pago || 'Pendiente',
     estado_pago: body.estado_pago || 'Pendiente',
+    ...pago,
     aplica_farmacos: Boolean(body.aplica_farmacos),
     observacion_farmacos: body.aplica_farmacos ? body.observacion_farmacos : null,
     observacion: body.observacion
@@ -50,22 +70,89 @@ const validarSesion = (body) => {
   if (!['pendiente', 'asistio', 'no_asistio', 'cancelada', 'reprogramada'].includes(body.asistencia || 'pendiente')) {
     return 'asistencia no es valida';
   }
-  if (!['QR', 'Efectivo', 'Transferencia', 'Pendiente'].includes(body.metodo_pago || 'Pendiente')) {
+  if (!['QR', 'Efectivo', 'Transferencia', 'Pendiente', 'Otro'].includes(body.metodo_pago || 'Pendiente')) {
     return 'metodo_pago no es valido';
   }
-  if (!['Pagado', 'Pendiente', 'Parcial'].includes(body.estado_pago || 'Pendiente')) {
+  if (!['Pagado', 'Pendiente', 'Parcial', 'Debe'].includes(body.estado_pago || 'Pendiente')) {
     return 'estado_pago no es válido';
   }
+  if (Number(body.monto_sesion || 0) < 0) return 'monto_sesion no puede ser negativo';
+  if (Number(body.monto_pagado || 0) < 0) return 'monto_pagado no puede ser negativo';
   return null;
 };
 
 const contarSesionesValidas = async (historiaClinicaId, transaction, excludeId = null) => {
   const where = {
     historia_clinica_id: historiaClinicaId,
-    asistencia: ['pendiente', 'asistio']
+    asistencia: 'asistio',
+    anulada: false
   };
   if (excludeId) where.id = { [Op.ne]: excludeId };
   return Sesion.count({ where, transaction });
+};
+
+const recalcularProgresoHistoria = async (historiaClinicaId, transaction) => {
+  if (!historiaClinicaId) return [];
+
+  const historia = await HistoriaClinica.findByPk(historiaClinicaId, {
+    include: [{ model: EvaluacionFinal, as: 'evaluacion_final' }],
+    transaction
+  });
+  if (!historia) return [];
+
+  const contratadas = Number(historia.evaluacion_final?.sesiones_contratadas || 0);
+  const sesiones = await Sesion.findAll({
+    where: {
+      historia_clinica_id: historiaClinicaId,
+      anulada: false
+    },
+    order: [['fecha', 'ASC'], ['id', 'ASC']],
+    transaction
+  });
+
+  let realizadas = 0;
+  const fechasAfectadas = new Map();
+
+  for (const sesion of sesiones) {
+    if (sesion.asistencia === 'asistio') realizadas += 1;
+    const numeroSesion = sesion.asistencia === 'asistio' ? realizadas : Math.max(realizadas, 1);
+
+    await sesion.update({
+      sesiones_debe: contratadas,
+      sesiones_hizo: realizadas,
+      numero_sesion: numeroSesion
+    }, { transaction });
+
+    fechasAfectadas.set(`${sesion.paciente_id}:${sesion.fecha}`, {
+      paciente_id: sesion.paciente_id,
+      fecha: sesion.fecha
+    });
+  }
+
+  return [...fechasAfectadas.values()];
+};
+
+const sincronizarFechas = async (fechas, transaction) => {
+  const unique = new Map(fechas.map((item) => [`${item.paciente_id}:${item.fecha}`, item]));
+  for (const item of unique.values()) {
+    await sincronizarSemana(item.paciente_id, item.fecha, transaction);
+  }
+};
+
+const recalcularHistoriasConSesiones = async (transaction) => {
+  const sesiones = await Sesion.findAll({
+    attributes: ['historia_clinica_id'],
+    where: {
+      historia_clinica_id: { [Op.ne]: null },
+      anulada: false
+    },
+    group: ['historia_clinica_id'],
+    transaction
+  });
+
+  for (const sesion of sesiones) {
+    await recalcularProgresoHistoria(sesion.historia_clinica_id, transaction);
+  }
 };
 
 const prepararSesionConHistoria = async (payload, transaction, sesionActual = null) => {
@@ -81,7 +168,7 @@ const prepararSesionConHistoria = async (payload, transaction, sesionActual = nu
   if (contratadas <= 0) return { error: 'La historia clinica no tiene sesiones indicadas registradas' };
 
   const cuentaActual = await contarSesionesValidas(historia.id, transaction, sesionActual?.id);
-  const cuentaEstaSesion = ['pendiente', 'asistio'].includes(payload.asistencia) ? 1 : 0;
+  const cuentaEstaSesion = payload.asistencia === 'asistio' ? 1 : 0;
   const realizadas = cuentaActual + cuentaEstaSesion;
 
   if (cuentaEstaSesion && realizadas > contratadas) {
@@ -99,10 +186,16 @@ const prepararSesionConHistoria = async (payload, transaction, sesionActual = nu
 };
 
 const listarSesiones = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
   try {
-    const sesiones = await Sesion.findAll({ include: includeSesion, order: [['fecha', 'DESC'], ['id', 'DESC']] });
+    await recalcularHistoriasConSesiones(transaction);
+    await transaction.commit();
+    const incluirAnuladas = String(req.query.incluir_anuladas || '').toLowerCase() === 'true';
+    const where = incluirAnuladas ? {} : { anulada: false };
+    const sesiones = await Sesion.findAll({ where, include: includeSesion, order: [['fecha', 'DESC'], ['id', 'DESC']] });
     return res.json(sesiones);
   } catch (error) {
+    if (!transaction.finished) await transaction.rollback();
     return next(error);
   }
 };
@@ -115,6 +208,12 @@ const obtenerSesion = async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
+};
+
+const nombreProfesional = (usuario) => {
+  const ficha = usuario?.ficha_personal;
+  const nombreFicha = [ficha?.titulo_profesional, ficha?.nombres, ficha?.apellido_paterno, ficha?.apellido_materno].filter(Boolean).join(' ');
+  return nombreFicha || usuario?.nombre || usuario?.usuario || 'Usuario del sistema';
 };
 
 const crearSesion = async (req, res, next) => {
@@ -141,7 +240,8 @@ const crearSesion = async (req, res, next) => {
     const payload = preparado.payload;
 
     const sesion = await Sesion.create({ ...payload, usuario_id: req.usuario.id }, { transaction });
-    await sincronizarSemana(payload.paciente_id, payload.fecha, transaction);
+    const fechasAfectadas = await recalcularProgresoHistoria(payload.historia_clinica_id, transaction);
+    await sincronizarFechas(fechasAfectadas, transaction);
     const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includeSesion, transaction });
     await transaction.commit();
     return res.status(201).json({
@@ -162,7 +262,7 @@ const actualizarSesion = async (req, res, next) => {
       await transaction.rollback();
       return res.status(404).json({ message: 'Sesion no encontrada' });
     }
-    const origen = { paciente_id: sesion.paciente_id, fecha: sesion.fecha };
+    const origen = { paciente_id: sesion.paciente_id, fecha: sesion.fecha, historia_clinica_id: sesion.historia_clinica_id };
 
     const basePayload = normalizarSesion({ ...sesion.toJSON(), ...req.body });
     const preparado = await prepararSesionConHistoria(basePayload, transaction, sesion);
@@ -178,7 +278,12 @@ const actualizarSesion = async (req, res, next) => {
     }
 
     await sesion.update(payload, { transaction });
-    await sincronizarSemana(origen.paciente_id, origen.fecha, transaction);
+    const fechasAfectadas = await recalcularProgresoHistoria(payload.historia_clinica_id, transaction);
+    if (String(origen.historia_clinica_id) !== String(payload.historia_clinica_id)) {
+      fechasAfectadas.push(...await recalcularProgresoHistoria(origen.historia_clinica_id, transaction));
+    }
+    fechasAfectadas.push({ paciente_id: origen.paciente_id, fecha: origen.fecha });
+    await sincronizarFechas(fechasAfectadas, transaction);
     if (String(origen.paciente_id) !== String(payload.paciente_id) || origen.fecha !== payload.fecha) {
       await sincronizarSemana(payload.paciente_id, payload.fecha, transaction);
     }
@@ -202,13 +307,29 @@ const eliminarSesion = async (req, res, next) => {
       await transaction.rollback();
       return res.status(404).json({ message: 'Sesion no encontrada' });
     }
-    const origen = { paciente_id: sesion.paciente_id, fecha: sesion.fecha };
+    if (sesion.anulada) {
+      await transaction.rollback();
+      return res.status(400).json({ message: 'La sesion ya esta anulada' });
+    }
+    if (!req.body?.motivo_anulacion) {
+      await transaction.rollback();
+      return res.status(400).json({ message: 'motivo_anulacion es requerido' });
+    }
+    const origen = { paciente_id: sesion.paciente_id, fecha: sesion.fecha, historia_clinica_id: sesion.historia_clinica_id };
 
-    await sesion.destroy({ transaction });
-    await sincronizarSemana(origen.paciente_id, origen.fecha, transaction);
+    await sesion.update({
+      anulada: true,
+      anulada_en: new Date(),
+      anulada_por: nombreProfesional(req.usuario),
+      motivo_anulacion: req.body.motivo_anulacion,
+      observacion_anulacion: req.body.observacion_anulacion || null
+    }, { transaction });
+    const fechasAfectadas = await recalcularProgresoHistoria(origen.historia_clinica_id, transaction);
+    fechasAfectadas.push({ paciente_id: origen.paciente_id, fecha: origen.fecha });
+    await sincronizarFechas(fechasAfectadas, transaction);
     await transaction.commit();
     return res.json({
-      message: 'Sesion eliminada correctamente',
+      message: 'Sesion anulada correctamente',
       sincronizacion_semanal: true
     });
   } catch (error) {

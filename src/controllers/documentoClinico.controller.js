@@ -34,6 +34,7 @@ const includeHistoria = [
 
 const normalizarTipo = (value) => String(value || '').trim();
 const esFechaValida = (value) => !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
+const filaFarmacoAnulada = (fila = {}) => Boolean(fila.anulado) || String(fila.estado || '').toLowerCase() === 'anulado';
 
 const limpiarDatosConsentimiento = (datos = {}) => ({
   nombre_completo: datos.nombre_completo || '',
@@ -111,8 +112,9 @@ const validarDocumento = (body) => {
     const filas = Array.isArray(body.datos?.filas) ? body.datos.filas : [];
     if (!filas.length) return 'Agrega al menos una fila.';
     for (const fila of filas) {
+      if (filaFarmacoAnulada(fila)) continue;
       if (!fila.paciente_id) return 'Cada fila debe tener paciente.';
-      const tieneMedicamento = fila.diclo || fila.dexa || fila.com_b;
+      const tieneMedicamento = fila.diclo || fila.dexa || fila.com_b || fila.otro || fila.otro_farmaco;
       if (!tieneMedicamento) return 'Cada fila debe tener al menos un medicamento marcado.';
       if (fila.qr) fila.metodo_pago = 'QR';
       if (Number(fila.monto_bs || 0) > 0 && !fila.metodo_pago) return 'Si registras monto, selecciona metodo de pago.';
@@ -124,7 +126,7 @@ const validarDocumento = (body) => {
 
 const upsertPagoFarmaco = async (documento, body, transaction) => {
   if (documento.tipo !== 'farmacos') return;
-  const filas = Array.isArray(body.datos?.filas) ? body.datos.filas : [];
+  const filas = (Array.isArray(body.datos?.filas) ? body.datos.filas : []).filter((fila) => !filaFarmacoAnulada(fila));
   const total = filas.reduce((sum, fila) => sum + Number(fila.monto_bs || 0), 0);
   const metodo = filas.find((fila) => Number(fila.monto_bs || 0) > 0)?.metodo_pago || 'Efectivo';
   const observaciones = filas.map((fila) => fila.observaciones).filter(Boolean).join(' | ');
@@ -185,7 +187,7 @@ const autocompletarPaciente = async (req, res, next) => {
       order: [['fecha_evaluacion', 'DESC'], ['id', 'DESC']]
     });
     const sesiones = await Sesion.findAll({
-      where: { paciente_id: paciente.id },
+      where: { paciente_id: paciente.id, anulada: false },
       order: [['fecha', 'DESC'], ['id', 'DESC']],
       limit: 20
     });

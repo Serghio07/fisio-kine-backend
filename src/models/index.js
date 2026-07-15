@@ -60,6 +60,8 @@ InformeMedico.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as
 
 Paciente.hasMany(RegistroSemanal, { foreignKey: 'paciente_id', as: 'registros_semanales', onDelete: 'CASCADE' });
 RegistroSemanal.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+HistoriaClinica.hasMany(RegistroSemanal, { foreignKey: 'historia_clinica_id', as: 'registros_semanales', onDelete: 'SET NULL' });
+RegistroSemanal.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historia_clinica' });
 
 Paciente.hasMany(PlanillaAtencion, { foreignKey: 'paciente_id', as: 'planillas_atencion', onDelete: 'CASCADE' });
 PlanillaAtencion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });

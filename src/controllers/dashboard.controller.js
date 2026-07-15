@@ -16,8 +16,8 @@ const resumenDashboard = async (req, res, next) => {
     const [totalPacientes, citasHoy, sesionesHoy, atendidosHoy, citasPendientes, informesGenerados] = await Promise.all([
       Paciente.count(),
       Cita.count({ where: { fecha: hoy } }),
-      Sesion.count({ where: { fecha: hoy } }),
-      Sesion.count({ where: { fecha: hoy, asistencia: 'asistio' } }),
+      Sesion.count({ where: { fecha: hoy, anulada: false } }),
+      Sesion.count({ where: { fecha: hoy, asistencia: 'asistio', anulada: false } }),
       Cita.count({ where: { estado: { [Op.in]: ['Pendiente', 'Confirmada'] } } }),
       InformeMedico.count()
     ]);
@@ -55,7 +55,7 @@ const proximasCitas = async (req, res, next) => {
 const sesionesHoy = async (req, res, next) => {
   try {
     const sesiones = await Sesion.findAll({
-      where: { fecha: fechaLocal() },
+      where: { fecha: fechaLocal(), anulada: false },
       include: includePaciente,
       order: [['id', 'DESC']],
       limit: 8

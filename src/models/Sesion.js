@@ -33,9 +33,9 @@ const Sesion = sequelize.define(
     metodo_pago: {
       type: DataTypes.STRING(30),
       allowNull: false,
-      defaultValue: 'pendiente',
+      defaultValue: 'Pendiente',
       validate: {
-        isIn: [['QR', 'Efectivo', 'Transferencia', 'Pendiente']]
+        isIn: [['QR', 'Efectivo', 'Transferencia', 'Pendiente', 'Otro']]
       }
     },
     estado_pago: {
@@ -43,8 +43,26 @@ const Sesion = sequelize.define(
       allowNull: false,
       defaultValue: 'Pendiente',
       validate: {
-        isIn: [['Pagado', 'Pendiente', 'Parcial']]
+        isIn: [['Pagado', 'Pendiente', 'Parcial', 'Debe']]
       }
+    },
+    monto_sesion: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0,
+      validate: { min: 0 }
+    },
+    monto_pagado: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0,
+      validate: { min: 0 }
+    },
+    saldo_pendiente: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0,
+      validate: { min: 0 }
     },
     aplica_farmacos: {
       type: DataTypes.BOOLEAN,
@@ -52,7 +70,16 @@ const Sesion = sequelize.define(
       defaultValue: false
     },
     observacion_farmacos: DataTypes.TEXT,
-    observacion: DataTypes.TEXT
+    observacion: DataTypes.TEXT,
+    anulada: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
+    },
+    anulada_en: DataTypes.DATE,
+    anulada_por: DataTypes.STRING(150),
+    motivo_anulacion: DataTypes.STRING(80),
+    observacion_anulacion: DataTypes.TEXT
   },
   {
     tableName: 'sesiones',

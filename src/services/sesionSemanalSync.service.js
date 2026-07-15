@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const { HistoriaClinica, Paciente, RegistroSemanal, Sesion } = require('../models');
+const { ensureRegistroSemanalSchema } = require('./registroSemanalSchema.service');
 
 const DAY_NAMES = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
 
@@ -37,9 +38,14 @@ const construirResumen = (sesiones) => {
       id: sesion.id,
       fecha: sesion.fecha,
       numero_sesion: sesion.numero_sesion,
+      sesiones_debe: Number(sesion.sesiones_debe || 0),
+      sesiones_hizo: Number(sesion.sesiones_hizo || 0),
       asistencia: sesion.asistencia,
       metodo_pago: sesion.metodo_pago,
       estado_pago: sesion.estado_pago,
+      monto_sesion: Number(sesion.monto_sesion || 0),
+      monto_pagado: Number(sesion.monto_pagado || 0),
+      saldo_pendiente: Number(sesion.saldo_pendiente || 0),
       aplica_farmacos: Boolean(sesion.aplica_farmacos),
       observacion_farmacos: sesion.observacion_farmacos || null,
       observacion: sesion.observacion || null
@@ -48,73 +54,125 @@ const construirResumen = (sesiones) => {
   return resumen;
 };
 
-const buscarDatosPaciente = async (pacienteId, transaction) => {
+const buscarDatosPaciente = async (pacienteId, historiaClinicaId, transaction) => {
   const paciente = await Paciente.findByPk(pacienteId, { transaction });
-  const historia = await HistoriaClinica.findOne({
-    where: { paciente_id: pacienteId },
-    order: [['fecha_evaluacion', 'DESC'], ['id', 'DESC']],
-    transaction
-  });
+  const historia = historiaClinicaId
+    ? await HistoriaClinica.findByPk(historiaClinicaId, { transaction })
+    : await HistoriaClinica.findOne({
+      where: { paciente_id: pacienteId },
+      order: [['fecha_evaluacion', 'DESC'], ['id', 'DESC']],
+      transaction
+    });
   return { paciente, historia };
+};
+
+const agruparPorHistoria = (sesiones) => sesiones.reduce((groups, sesion) => {
+  const key = sesion.historia_clinica_id || 'sin_historia';
+  if (!groups[key]) groups[key] = [];
+  groups[key].push(sesion);
+  return groups;
+}, {});
+
+const resumenObservaciones = (sesiones) => {
+  const observaciones = sesiones.map((sesion) => sesion.observacion).filter(Boolean);
+  return observaciones.length ? observaciones.join(' ') : null;
 };
 
 const sincronizarSemana = async (pacienteId, fecha, transaction) => {
   if (!pacienteId || !fecha) return null;
+  await ensureRegistroSemanalSchema(transaction);
   const semana = obtenerSemana(fecha);
   const sesiones = await Sesion.findAll({
     where: {
       paciente_id: pacienteId,
-      fecha: { [Op.between]: [semana.inicio, semana.fin] }
+      fecha: { [Op.between]: [semana.inicio, semana.fin] },
+      anulada: false
     },
     order: [['fecha', 'ASC'], ['id', 'ASC']],
     transaction
   });
 
-  let registro = await RegistroSemanal.findOne({
-    where: { paciente_id: pacienteId, semana_inicio: semana.inicio },
-    order: [['id', 'ASC']],
+  if (!sesiones.length) {
+    await RegistroSemanal.destroy({
+      where: {
+        paciente_id: pacienteId,
+        semana_inicio: semana.inicio,
+        generado_automaticamente: true
+      },
+      transaction
+    });
+    return [];
+  }
+
+  const grupos = agruparPorHistoria(sesiones);
+  const historiasActivas = Object.keys(grupos).map((key) => (key === 'sin_historia' ? null : Number(key)));
+  const historiasActivasConId = historiasActivas.filter((id) => id !== null);
+  const permiteHistoriaNula = historiasActivas.includes(null);
+  const registros = [];
+
+  const staleHistoriaWhere = historiasActivasConId.length
+    ? {
+      [Op.or]: [
+        ...(!permiteHistoriaNula ? [{ historia_clinica_id: null }] : []),
+        { historia_clinica_id: { [Op.notIn]: historiasActivasConId } }
+      ]
+    }
+    : { historia_clinica_id: { [Op.ne]: null } };
+
+  await RegistroSemanal.destroy({
+    where: {
+      paciente_id: pacienteId,
+      semana_inicio: semana.inicio,
+      generado_automaticamente: true,
+      ...staleHistoriaWhere
+    },
     transaction
   });
 
-  if (!sesiones.length) {
-    if (registro?.generado_automaticamente) {
-      await registro.destroy({ transaction });
-      return null;
-    }
-    if (registro) {
-      await registro.update({
-        sesiones_resumen: {},
-        total_sesiones: 0,
-        sincronizado_sesiones: false,
-        aplica_farmacos: false
+  for (const [historiaKey, sesionesHistoria] of Object.entries(grupos)) {
+    const historiaClinicaId = historiaKey === 'sin_historia' ? null : Number(historiaKey);
+    let registro = await RegistroSemanal.findOne({
+      where: {
+        paciente_id: pacienteId,
+        semana_inicio: semana.inicio,
+        historia_clinica_id: historiaClinicaId
+      },
+      order: [['id', 'ASC']],
+      transaction
+    });
+
+    const { paciente, historia } = await buscarDatosPaciente(pacienteId, historiaClinicaId, transaction);
+
+    if (!registro) {
+      registro = await RegistroSemanal.create({
+        paciente_id: pacienteId,
+        historia_clinica_id: historiaClinicaId,
+        semana_inicio: semana.inicio,
+        semana_fin: semana.fin,
+        generado_automaticamente: true
       }, { transaction });
     }
-    return registro;
-  }
 
-  if (!registro) {
-    const { paciente, historia } = await buscarDatosPaciente(pacienteId, transaction);
-    registro = await RegistroSemanal.create({
-      paciente_id: pacienteId,
-      semana_inicio: semana.inicio,
+    const deudaSemana = sesionesHistoria.reduce((sum, sesion) => sum + Number(sesion.saldo_pendiente || 0), 0);
+    await registro.update({
+      historia_clinica_id: historiaClinicaId,
       semana_fin: semana.fin,
-      diagnostico: historia?.diagnostico_medico || null,
+      diagnostico: historia?.diagnostico_medico || historia?.motivo_consulta || null,
       telefono: paciente?.telefono || null,
       edad: paciente?.edad ?? null,
       sexo: normalizarSexoRegistro(paciente?.sexo),
-      generado_automaticamente: true
+      sesiones_resumen: construirResumen(sesionesHistoria),
+      total_sesiones: sesionesHistoria.length,
+      sincronizado_sesiones: true,
+      aplica_farmacos: sesionesHistoria.some((sesion) => Boolean(sesion.aplica_farmacos)),
+      debe_bs: deudaSemana,
+      observacion: resumenObservaciones(sesionesHistoria)
     }, { transaction });
+
+    registros.push(registro);
   }
 
-  await registro.update({
-    semana_fin: semana.fin,
-    sesiones_resumen: construirResumen(sesiones),
-    total_sesiones: sesiones.length,
-    sincronizado_sesiones: true,
-    aplica_farmacos: sesiones.some((sesion) => Boolean(sesion.aplica_farmacos))
-  }, { transaction });
-
-  return registro;
+  return registros;
 };
 
 module.exports = {

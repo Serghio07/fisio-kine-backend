@@ -4,6 +4,7 @@ const autorizarRoles = require('../middlewares/role.middleware');
 const {
   listarRegistros,
   obtenerRegistro,
+  recalcularSemana,
   crearRegistro,
   actualizarRegistro,
   eliminarRegistro
@@ -12,6 +13,7 @@ const {
 router.use(autenticar);
 
 router.get('/', listarRegistros);
+router.post('/recalcular', autorizarRoles('admin', 'personal'), recalcularSemana);
 router.get('/:id', obtenerRegistro);
 router.post('/', autorizarRoles('admin', 'personal'), crearRegistro);
 router.put('/:id', autorizarRoles('admin', 'personal'), actualizarRegistro);
