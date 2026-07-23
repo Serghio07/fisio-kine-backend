@@ -1,6 +1,8 @@
 const { Op } = require('sequelize');
-const { EvaluacionFinal, HistoriaClinica, Paciente, Personal, Sesion, Usuario, sequelize } = require('../models');
+const { randomUUID } = require('crypto');
+const { EvaluacionFinal, HistoriaClinica, IntervencionClinica, Paciente, Personal, Sesion, Usuario, sequelize } = require('../models');
 const { sincronizarSemana } = require('../services/sesionSemanalSync.service');
+const { sincronizarConceptoSesion } = require('../services/planillaPagosSync.service');
 
 const includeSesion = [
   { model: Paciente, as: 'paciente' },
@@ -57,6 +59,15 @@ const normalizarSesion = (body) => {
     ...pago,
     aplica_farmacos: Boolean(body.aplica_farmacos),
     observacion_farmacos: body.aplica_farmacos ? body.observacion_farmacos : null,
+    medios_fisicos: body.medios_fisicos || null,
+    tecnicas_manuales: body.tecnicas_manuales || null,
+    descripcion_tratamiento: body.descripcion_tratamiento || null,
+    evolucion_observada: body.evolucion_observada || null,
+    dolor_antes: body.dolor_antes === '' || body.dolor_antes == null ? null : Number(body.dolor_antes),
+    dolor_despues: body.dolor_despues === '' || body.dolor_despues == null ? null : Number(body.dolor_despues),
+    inyectable_nombre: body.aplica_farmacos ? body.inyectable_nombre || null : null,
+    inyectable_dosis: body.aplica_farmacos ? body.inyectable_dosis || null : null,
+    profesional_responsable: body.profesional_responsable || null,
     observacion: body.observacion
   };
 };
@@ -78,7 +89,92 @@ const validarSesion = (body) => {
   }
   if (Number(body.monto_sesion || 0) < 0) return 'monto_sesion no puede ser negativo';
   if (Number(body.monto_pagado || 0) < 0) return 'monto_pagado no puede ser negativo';
+  if (body.dolor_antes !== null && body.dolor_antes !== '' && (Number(body.dolor_antes) < 0 || Number(body.dolor_antes) > 10)) return 'dolor_antes debe estar entre 0 y 10';
+  if (body.dolor_despues !== null && body.dolor_despues !== '' && (Number(body.dolor_despues) < 0 || Number(body.dolor_despues) > 10)) return 'dolor_despues debe estar entre 0 y 10';
   return null;
+};
+
+const sincronizarEvolutivoSesion = async (sesion, transaction) => {
+  if (!sesion.historia_clinica_id) return;
+  const historia = await HistoriaClinica.findByPk(sesion.historia_clinica_id, { transaction });
+  if (!historia) return;
+  const anteriores = Array.isArray(historia.evolutivo) ? historia.evolutivo : [];
+  const index = anteriores.findIndex((item) => String(item.sesion_id || '') === String(sesion.id));
+  if (index < 0 && sesion.asistencia !== 'asistio') return;
+  const anterior = index >= 0 ? anteriores[index] : {};
+  const tratamiento = [sesion.medios_fisicos, sesion.tecnicas_manuales, sesion.descripcion_tratamiento].filter(Boolean).join(' · ');
+  const inyectable = [sesion.inyectable_nombre, sesion.inyectable_dosis].filter(Boolean).join(' · ');
+  const ahora = new Date().toISOString();
+  const evolutivo = {
+    ...anterior,
+    id: anterior.id || randomUUID(),
+    sesion_id: sesion.id,
+    historia_clinica_id: historia.id,
+    paciente_id: sesion.paciente_id,
+    numero_sesion: sesion.numero_sesion,
+    fecha_sesion: sesion.fecha,
+    medios_fisicos: sesion.medios_fisicos,
+    tecnicas_manuales: sesion.tecnicas_manuales,
+    descripcion_tratamiento: sesion.descripcion_tratamiento,
+    procedimiento_realizado: tratamiento || sesion.observacion || null,
+    evolucion_observada: sesion.evolucion_observada,
+    dolor_inicial: sesion.dolor_antes,
+    dolor_final: sesion.dolor_despues,
+    inyectable_nombre: sesion.inyectable_nombre,
+    inyectable_dosis: sesion.inyectable_dosis,
+    inyectables: inyectable || null,
+    observaciones: sesion.observacion,
+    profesional_responsable: sesion.profesional_responsable,
+    estado: !sesion.anulada && sesion.asistencia === 'asistio' ? 'activo' : 'anulado',
+    fecha_creacion: anterior.fecha_creacion || ahora,
+    fecha_actualizacion: ahora,
+    ...(sesion.anulada ? { fecha_anulacion: ahora } : {})
+  };
+  const siguientes = [...anteriores];
+  if (index >= 0) siguientes[index] = evolutivo;
+  else siguientes.push(evolutivo);
+  await historia.update({ evolutivo: siguientes }, { transaction });
+};
+
+const recalcularCadenaDolor = async (historiaId, transaction) => {
+  if (!historiaId) return;
+  const historia = await HistoriaClinica.findByPk(historiaId, {
+    include: [{ model: IntervencionClinica, as: 'intervencion_clinica' }],
+    transaction
+  });
+  if (!historia) return;
+
+  const sesiones = await Sesion.findAll({
+    where: { historia_clinica_id: historiaId, asistencia: 'asistio', anulada: false },
+    order: [['numero_sesion', 'ASC'], ['fecha', 'ASC'], ['id', 'ASC']],
+    transaction
+  });
+  let dolorAnterior = historia.intervencion_clinica?.escala_dolor;
+  dolorAnterior = dolorAnterior === '' || dolorAnterior == null ? null : Number(dolorAnterior);
+
+  for (const sesion of sesiones) {
+    if (sesion.dolor_antes !== dolorAnterior) {
+      await sesion.update({ dolor_antes: dolorAnterior }, { transaction });
+    }
+    await sincronizarEvolutivoSesion(sesion, transaction);
+    if (sesion.dolor_despues !== '' && sesion.dolor_despues != null) {
+      dolorAnterior = Number(sesion.dolor_despues);
+    }
+  }
+};
+
+const anularEvolutivoEnHistoria = async (historiaId, sesionId, transaction) => {
+  if (!historiaId) return;
+  const historia = await HistoriaClinica.findByPk(historiaId, { transaction });
+  if (!historia || !Array.isArray(historia.evolutivo)) return;
+  let cambio = false;
+  const ahora = new Date().toISOString();
+  const siguientes = historia.evolutivo.map((item) => {
+    if (String(item.sesion_id || '') !== String(sesionId)) return item;
+    cambio = true;
+    return { ...item, estado: 'anulado', fecha_anulacion: ahora, fecha_actualizacion: ahora };
+  });
+  if (cambio) await historia.update({ evolutivo: siguientes }, { transaction });
 };
 
 const contarSesionesValidas = async (historiaClinicaId, transaction, excludeId = null) => {
@@ -152,6 +248,7 @@ const recalcularHistoriasConSesiones = async (transaction) => {
 
   for (const sesion of sesiones) {
     await recalcularProgresoHistoria(sesion.historia_clinica_id, transaction);
+    await recalcularCadenaDolor(sesion.historia_clinica_id, transaction);
   }
 };
 
@@ -231,7 +328,7 @@ const crearSesion = async (req, res, next) => {
       return res.status(404).json({ message: 'Paciente no encontrado' });
     }
 
-    const basePayload = normalizarSesion(req.body);
+    const basePayload = normalizarSesion({ ...req.body, profesional_responsable: req.body.profesional_responsable || nombreProfesional(req.usuario) });
     const preparado = await prepararSesionConHistoria(basePayload, transaction);
     if (preparado.error) {
       await transaction.rollback();
@@ -241,6 +338,10 @@ const crearSesion = async (req, res, next) => {
 
     const sesion = await Sesion.create({ ...payload, usuario_id: req.usuario.id }, { transaction });
     const fechasAfectadas = await recalcularProgresoHistoria(payload.historia_clinica_id, transaction);
+    await sesion.reload({ transaction });
+    await sincronizarConceptoSesion(sesion, transaction, { importarPago: true });
+    await recalcularCadenaDolor(payload.historia_clinica_id, transaction);
+    await sesion.reload({ transaction });
     await sincronizarFechas(fechasAfectadas, transaction);
     const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includeSesion, transaction });
     await transaction.commit();
@@ -264,7 +365,8 @@ const actualizarSesion = async (req, res, next) => {
     }
     const origen = { paciente_id: sesion.paciente_id, fecha: sesion.fecha, historia_clinica_id: sesion.historia_clinica_id };
 
-    const basePayload = normalizarSesion({ ...sesion.toJSON(), ...req.body });
+    const mergedBody = { ...sesion.toJSON(), ...req.body };
+    const basePayload = normalizarSesion({ ...mergedBody, profesional_responsable: mergedBody.profesional_responsable || nombreProfesional(req.usuario) });
     const preparado = await prepararSesionConHistoria(basePayload, transaction, sesion);
     if (preparado.error) {
       await transaction.rollback();
@@ -281,12 +383,20 @@ const actualizarSesion = async (req, res, next) => {
     const fechasAfectadas = await recalcularProgresoHistoria(payload.historia_clinica_id, transaction);
     if (String(origen.historia_clinica_id) !== String(payload.historia_clinica_id)) {
       fechasAfectadas.push(...await recalcularProgresoHistoria(origen.historia_clinica_id, transaction));
+      await anularEvolutivoEnHistoria(origen.historia_clinica_id, sesion.id, transaction);
     }
     fechasAfectadas.push({ paciente_id: origen.paciente_id, fecha: origen.fecha });
     await sincronizarFechas(fechasAfectadas, transaction);
     if (String(origen.paciente_id) !== String(payload.paciente_id) || origen.fecha !== payload.fecha) {
       await sincronizarSemana(payload.paciente_id, payload.fecha, transaction);
     }
+    await sesion.reload({ transaction });
+    await sincronizarConceptoSesion(sesion, transaction);
+    await recalcularCadenaDolor(payload.historia_clinica_id, transaction);
+    if (String(origen.historia_clinica_id) !== String(payload.historia_clinica_id)) {
+      await recalcularCadenaDolor(origen.historia_clinica_id, transaction);
+    }
+    await sesion.reload({ transaction });
     const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includeSesion, transaction });
     await transaction.commit();
     return res.json({
@@ -324,7 +434,11 @@ const eliminarSesion = async (req, res, next) => {
       motivo_anulacion: req.body.motivo_anulacion,
       observacion_anulacion: req.body.observacion_anulacion || null
     }, { transaction });
+    await sesion.reload({ transaction });
+    await sincronizarConceptoSesion(sesion, transaction);
+    await sincronizarEvolutivoSesion(sesion, transaction);
     const fechasAfectadas = await recalcularProgresoHistoria(origen.historia_clinica_id, transaction);
+    await recalcularCadenaDolor(origen.historia_clinica_id, transaction);
     fechasAfectadas.push({ paciente_id: origen.paciente_id, fecha: origen.fecha });
     await sincronizarFechas(fechasAfectadas, transaction);
     await transaction.commit();

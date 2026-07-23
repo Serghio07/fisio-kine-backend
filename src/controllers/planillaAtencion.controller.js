@@ -1,9 +1,11 @@
 const { Op } = require('sequelize');
-const { Paciente, PlanillaAtencion, PlanillaSesion } = require('../models');
+const { HistoriaClinica, Paciente, PlanillaAtencion, PlanillaSesion, Sesion } = require('../models');
+const { ensurePlanillaAtencionSchema } = require('../services/planillaAtencionSchema.service');
 
 const includeCompleto = [
   { model: Paciente, as: 'paciente' },
-  { model: PlanillaSesion, as: 'sesiones', order: [['numero_sesion', 'ASC']] }
+  { model: HistoriaClinica, as: 'historia_clinica' },
+  { model: PlanillaSesion, as: 'sesiones', include: [{ model: Sesion, as: 'sesion_registrada' }], order: [['numero_sesion', 'ASC']] }
 ];
 
 const esFechaValida = (value) => !value || !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
@@ -27,6 +29,7 @@ const validarPlanilla = (body) => {
 
 const normalizarPlanilla = (body) => ({
   paciente_id: body.paciente_id,
+  historia_clinica_id: body.historia_clinica_id || null,
   fecha_inicio: body.fecha_inicio || null,
   fecha_fin: body.fecha_fin || null,
   diagnostico: body.diagnostico,
@@ -36,6 +39,7 @@ const normalizarPlanilla = (body) => ({
 const normalizarSesion = (body, planilla) => ({
   planilla_id: planilla.id,
   paciente_id: planilla.paciente_id,
+  sesion_id: body.sesion_id || null,
   fecha: body.fecha,
   numero_sesion: Number(body.numero_sesion),
   firma_paciente: body.firma_paciente,
@@ -51,6 +55,7 @@ const obtenerCompleta = (id) =>
 
 const listarPlanillas = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const planillas = await PlanillaAtencion.findAll({
       include: includeCompleto,
       order: [['created_at', 'DESC'], ['id', 'DESC']]
@@ -63,6 +68,7 @@ const listarPlanillas = async (req, res, next) => {
 
 const listarPlanillasPaciente = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const planillas = await PlanillaAtencion.findAll({
       where: { paciente_id: req.params.id },
       include: includeCompleto,
@@ -76,6 +82,7 @@ const listarPlanillasPaciente = async (req, res, next) => {
 
 const obtenerPlanilla = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const planilla = await obtenerCompleta(req.params.id);
     if (!planilla) return res.status(404).json({ message: 'Planilla no encontrada' });
     return res.json(planilla);
@@ -86,11 +93,16 @@ const obtenerPlanilla = async (req, res, next) => {
 
 const crearPlanilla = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const errorValidacion = validarPlanilla(req.body);
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
 
     const paciente = await Paciente.findByPk(req.body.paciente_id);
     if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado' });
+    if (req.body.historia_clinica_id) {
+      const historia = await HistoriaClinica.findOne({ where: { id: req.body.historia_clinica_id, paciente_id: req.body.paciente_id } });
+      if (!historia) return res.status(400).json({ message: 'La historia clínica no pertenece al paciente seleccionado' });
+    }
 
     const planilla = await PlanillaAtencion.create(normalizarPlanilla(req.body));
     if (Array.isArray(req.body.sesiones) && req.body.sesiones.length) {
@@ -105,12 +117,17 @@ const crearPlanilla = async (req, res, next) => {
 
 const actualizarPlanilla = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const planilla = await PlanillaAtencion.findByPk(req.params.id);
     if (!planilla) return res.status(404).json({ message: 'Planilla no encontrada' });
 
     const payload = { ...planilla.toJSON(), ...req.body };
     const errorValidacion = validarPlanilla(payload);
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
+    if (payload.historia_clinica_id) {
+      const historia = await HistoriaClinica.findOne({ where: { id: payload.historia_clinica_id, paciente_id: payload.paciente_id } });
+      if (!historia) return res.status(400).json({ message: 'La historia clínica no pertenece al paciente seleccionado' });
+    }
 
     await planilla.update(normalizarPlanilla(payload));
     if (Array.isArray(req.body.sesiones)) {
@@ -128,6 +145,7 @@ const actualizarPlanilla = async (req, res, next) => {
 
 const eliminarPlanilla = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const planilla = await PlanillaAtencion.findByPk(req.params.id);
     if (!planilla) return res.status(404).json({ message: 'Planilla no encontrada' });
     await planilla.destroy();
@@ -139,6 +157,7 @@ const eliminarPlanilla = async (req, res, next) => {
 
 const crearSesion = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const planilla = await PlanillaAtencion.findByPk(req.params.id);
     if (!planilla) return res.status(404).json({ message: 'Planilla no encontrada' });
     if (!req.body.fecha) return res.status(400).json({ message: 'fecha es requerida' });
@@ -158,6 +177,7 @@ const crearSesion = async (req, res, next) => {
 
 const actualizarSesion = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const sesion = await PlanillaSesion.findByPk(req.params.id);
     if (!sesion) return res.status(404).json({ message: 'Sesion no encontrada' });
     if (req.body.fecha !== undefined && !req.body.fecha) return res.status(400).json({ message: 'fecha es requerida' });
@@ -177,6 +197,7 @@ const actualizarSesion = async (req, res, next) => {
     await sesion.update({
       fecha: req.body.fecha ?? sesion.fecha,
       numero_sesion: req.body.numero_sesion ? Number(req.body.numero_sesion) : sesion.numero_sesion,
+      sesion_id: req.body.sesion_id ?? sesion.sesion_id,
       firma_paciente: req.body.firma_paciente ?? sesion.firma_paciente,
       firma_profesional: req.body.firma_profesional ?? sesion.firma_profesional,
       observacion: req.body.observacion ?? sesion.observacion
@@ -190,6 +211,7 @@ const actualizarSesion = async (req, res, next) => {
 
 const eliminarSesion = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const sesion = await PlanillaSesion.findByPk(req.params.id);
     if (!sesion) return res.status(404).json({ message: 'Sesion no encontrada' });
     const planillaId = sesion.planilla_id;
@@ -202,6 +224,7 @@ const eliminarSesion = async (req, res, next) => {
 
 const descargarPdf = async (req, res, next) => {
   try {
+    await ensurePlanillaAtencionSchema();
     const planilla = await obtenerCompleta(req.params.id);
     if (!planilla) return res.status(404).json({ message: 'Planilla no encontrada' });
     return res.json({

@@ -30,7 +30,13 @@ CREATE TABLE IF NOT EXISTS planillas_personal (
   mes INTEGER NOT NULL CHECK (mes BETWEEN 1 AND 12),
   anio INTEGER NOT NULL CHECK (anio BETWEEN 2000 AND 2200),
   usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  fecha_planilla DATE NOT NULL DEFAULT CURRENT_DATE,
+  estado VARCHAR(15) NOT NULL DEFAULT 'borrador',
   observaciones TEXT,
+  cerrada_en TIMESTAMP WITH TIME ZONE,
+  reabierta_en TIMESTAMP WITH TIME ZONE,
+  anulada_en TIMESTAMP WITH TIME ZONE,
+  motivo_anulacion TEXT,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   UNIQUE (mes, anio)
@@ -48,6 +54,9 @@ CREATE TABLE IF NOT EXISTS planillas_personal_detalle (
   cargo VARCHAR(120),
   horario VARCHAR(255),
   sueldo_base DECIMAL(10,2),
+  monto_servicio DECIMAL(10,2),
+  estado_laboral VARCHAR(20),
+  firma VARCHAR(255),
   tipo_pago VARCHAR(20) NOT NULL DEFAULT 'mensual',
   CONSTRAINT planilla_detalle_tipo_pago_check CHECK (tipo_pago IN ('mensual', 'por_servicio'))
 );
@@ -56,3 +65,13 @@ CREATE INDEX IF NOT EXISTS personal_estado_idx ON personal(estado);
 CREATE INDEX IF NOT EXISTS personal_cargo_idx ON personal(cargo);
 CREATE INDEX IF NOT EXISTS planillas_personal_periodo_idx ON planillas_personal(anio, mes);
 CREATE INDEX IF NOT EXISTS planillas_personal_detalle_planilla_idx ON planillas_personal_detalle(planilla_id);
+
+ALTER TABLE planillas_personal ADD COLUMN IF NOT EXISTS fecha_planilla DATE NOT NULL DEFAULT CURRENT_DATE;
+ALTER TABLE planillas_personal ADD COLUMN IF NOT EXISTS estado VARCHAR(15) NOT NULL DEFAULT 'borrador';
+ALTER TABLE planillas_personal ADD COLUMN IF NOT EXISTS cerrada_en TIMESTAMP WITH TIME ZONE;
+ALTER TABLE planillas_personal ADD COLUMN IF NOT EXISTS reabierta_en TIMESTAMP WITH TIME ZONE;
+ALTER TABLE planillas_personal ADD COLUMN IF NOT EXISTS anulada_en TIMESTAMP WITH TIME ZONE;
+ALTER TABLE planillas_personal ADD COLUMN IF NOT EXISTS motivo_anulacion TEXT;
+ALTER TABLE planillas_personal_detalle ADD COLUMN IF NOT EXISTS monto_servicio DECIMAL(10,2);
+ALTER TABLE planillas_personal_detalle ADD COLUMN IF NOT EXISTS estado_laboral VARCHAR(20);
+ALTER TABLE planillas_personal_detalle ADD COLUMN IF NOT EXISTS firma VARCHAR(255);

@@ -1,7 +1,7 @@
 const { Op } = require('sequelize');
-const { HistoriaClinica, Paciente, RegistroSemanal, Sesion, sequelize } = require('../models');
+const { HistoriaClinica, Paciente, RegistroSemanal, Sesion, Usuario, sequelize } = require('../models');
 const { ensureRegistroSemanalSchema } = require('../services/registroSemanalSchema.service');
-const { sincronizarSemana } = require('../services/sesionSemanalSync.service');
+const { construirResumen, sincronizarSemana } = require('../services/sesionSemanalSync.service');
 
 const includeRegistroSemanal = [
   { model: Paciente, as: 'paciente' },
@@ -55,7 +55,51 @@ const listarRegistros = async (req, res, next) => {
       include: includeRegistroSemanal,
       order: [['semana_inicio', 'DESC'], ['id', 'DESC']]
     });
-    return res.json(registros);
+
+    const sesiones = req.query.fecha_inicio && req.query.fecha_fin
+      ? await Sesion.findAll({
+        where: {
+          fecha: { [Op.between]: [req.query.fecha_inicio, req.query.fecha_fin] },
+          anulada: false
+        },
+        include: [{ model: Usuario, as: 'registrado_por', attributes: ['nombre'] }],
+        order: [['fecha', 'ASC'], ['numero_sesion', 'ASC'], ['id', 'ASC']]
+      })
+      : [];
+
+    const respuesta = registros.filter((registro) => (
+      registro.historia_clinica
+      && !registro.historia_clinica.anulada
+      && !['anulada', 'inactiva'].includes(registro.historia_clinica.estado)
+    )).map((registro) => {
+      const data = registro.toJSON();
+      const sesionesRegistro = sesiones.filter((sesion) => (
+        Number(sesion.paciente_id) === Number(registro.paciente_id)
+        && String(sesion.historia_clinica_id || '') === String(registro.historia_clinica_id || '')
+        && sesion.fecha >= registro.semana_inicio
+        && sesion.fecha <= registro.semana_fin
+      ));
+      const evolutivos = Array.isArray(data.historia_clinica?.evolutivo) ? data.historia_clinica.evolutivo : [];
+      const sesionesConEvolutivo = sesionesRegistro.map((sesionModel) => {
+        const sesion = sesionModel.toJSON();
+        const evolutivo = evolutivos.find((item) => String(item.sesion_id || '') === String(sesion.id)) || {};
+        return {
+          ...sesion,
+          dolor_antes: sesion.dolor_antes ?? evolutivo.dolor_inicial ?? null,
+          dolor_despues: sesion.dolor_despues ?? evolutivo.dolor_final ?? null,
+          descripcion_tratamiento: sesion.descripcion_tratamiento || evolutivo.descripcion_tratamiento || evolutivo.procedimiento_realizado || null,
+          evolucion_observada: sesion.evolucion_observada || evolutivo.evolucion_observada || null,
+          observacion: sesion.observacion || evolutivo.observaciones || null,
+          inyectable_nombre: sesion.inyectable_nombre || evolutivo.inyectable_nombre || evolutivo.inyectables || null,
+          inyectable_dosis: sesion.inyectable_dosis || evolutivo.inyectable_dosis || null,
+          profesional_responsable: sesion.profesional_responsable || evolutivo.profesional_responsable || sesion.registrado_por?.nombre || null
+        };
+      });
+      return req.query.fecha_inicio && req.query.fecha_fin
+        ? { ...data, sesiones_resumen: construirResumen(sesionesConEvolutivo), total_sesiones: sesionesConEvolutivo.length }
+        : data;
+    });
+    return res.json(respuesta);
   } catch (error) {
     return next(error);
   }

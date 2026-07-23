@@ -7,6 +7,7 @@ const PlanillaSesion = sequelize.define(
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     planilla_id: { type: DataTypes.INTEGER, allowNull: false },
     paciente_id: { type: DataTypes.INTEGER, allowNull: false },
+    sesion_id: DataTypes.INTEGER,
     fecha: { type: DataTypes.DATEONLY, allowNull: false },
     numero_sesion: { type: DataTypes.INTEGER, allowNull: false },
     firma_paciente: DataTypes.STRING(180),

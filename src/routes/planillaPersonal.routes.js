@@ -6,7 +6,11 @@ const {
   obtenerPlanilla,
   obtenerPorPeriodo,
   crearPlanilla,
-  actualizarPlanilla
+  actualizarPlanilla,
+  eliminarPlanilla,
+  cerrarPlanilla,
+  reabrirPlanilla,
+  anularPlanilla
 } = require('../controllers/planillaPersonal.controller');
 
 router.use(autenticar, autorizarRoles('admin'));
@@ -15,5 +19,9 @@ router.get('/periodo/:anio/:mes', obtenerPorPeriodo);
 router.get('/:id', obtenerPlanilla);
 router.post('/', crearPlanilla);
 router.put('/:id', actualizarPlanilla);
+router.delete('/:id', eliminarPlanilla);
+router.patch('/:id/cerrar', cerrarPlanilla);
+router.patch('/:id/reabrir', reabrirPlanilla);
+router.patch('/:id/anular', anularPlanilla);
 
 module.exports = router;

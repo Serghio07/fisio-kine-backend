@@ -48,7 +48,17 @@ const construirResumen = (sesiones) => {
       saldo_pendiente: Number(sesion.saldo_pendiente || 0),
       aplica_farmacos: Boolean(sesion.aplica_farmacos),
       observacion_farmacos: sesion.observacion_farmacos || null,
-      observacion: sesion.observacion || null
+      observacion: sesion.observacion || null,
+      medios_fisicos: sesion.medios_fisicos || null,
+      tecnicas_manuales: sesion.tecnicas_manuales || null,
+      descripcion_tratamiento: sesion.descripcion_tratamiento || null,
+      evolucion_observada: sesion.evolucion_observada || null,
+      dolor_antes: sesion.dolor_antes ?? null,
+      dolor_despues: sesion.dolor_despues ?? null,
+      inyectable_nombre: sesion.inyectable_nombre || null,
+      inyectable_dosis: sesion.inyectable_dosis || null,
+      profesional_responsable: sesion.profesional_responsable || sesion.registrado_por?.nombre || null,
+      anulada: Boolean(sesion.anulada)
     });
   });
   return resumen;
@@ -176,6 +186,7 @@ const sincronizarSemana = async (pacienteId, fecha, transaction) => {
 };
 
 module.exports = {
+  construirResumen,
   obtenerSemana,
   sincronizarSemana
 };

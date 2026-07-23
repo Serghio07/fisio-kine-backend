@@ -70,6 +70,15 @@ const Sesion = sequelize.define(
       defaultValue: false
     },
     observacion_farmacos: DataTypes.TEXT,
+    medios_fisicos: DataTypes.TEXT,
+    tecnicas_manuales: DataTypes.TEXT,
+    descripcion_tratamiento: DataTypes.TEXT,
+    evolucion_observada: DataTypes.TEXT,
+    dolor_antes: { type: DataTypes.INTEGER, validate: { min: 0, max: 10 } },
+    dolor_despues: { type: DataTypes.INTEGER, validate: { min: 0, max: 10 } },
+    inyectable_nombre: DataTypes.STRING(180),
+    inyectable_dosis: DataTypes.STRING(180),
+    profesional_responsable: DataTypes.STRING(180),
     observacion: DataTypes.TEXT,
     anulada: {
       type: DataTypes.BOOLEAN,

@@ -19,6 +19,8 @@ const planillaPersonalRoutes = require('./routes/planillaPersonal.routes');
 const tareaPersonalRoutes = require('./routes/tareaPersonal.routes');
 const documentoClinicoRoutes = require('./routes/documentoClinico.routes');
 const actividadRoutes = require('./routes/actividad.routes');
+const planillaPagosRoutes = require('./routes/planillaPagos.routes');
+const resumenDiarioRoutes = require('./routes/resumenDiario.routes');
 const registrarActividad = require('./middlewares/actividad.middleware');
 
 const app = express();
@@ -61,6 +63,8 @@ app.use('/api/planillas-personal', planillaPersonalRoutes);
 app.use('/api/tareas-personal', tareaPersonalRoutes);
 app.use('/api/documentos-clinicos', documentoClinicoRoutes);
 app.use('/api/actividades', actividadRoutes);
+app.use('/api/planilla-pagos', planillaPagosRoutes);
+app.use('/api/resumen-diario', resumenDiarioRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

@@ -21,6 +21,11 @@ const TareaPersonal = require('./TareaPersonal');
 const ActividadSistema = require('./ActividadSistema');
 const DocumentoClinico = require('./DocumentoClinico');
 const PagoClinico = require('./PagoClinico');
+const ConceptoCobro = require('./ConceptoCobro');
+const MovimientoPago = require('./MovimientoPago');
+const MovimientoPagoAuditoria = require('./MovimientoPagoAuditoria');
+const ArqueoPago = require('./ArqueoPago');
+const ObservacionDiaria = require('./ObservacionDiaria');
 
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -65,12 +70,16 @@ RegistroSemanal.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', 
 
 Paciente.hasMany(PlanillaAtencion, { foreignKey: 'paciente_id', as: 'planillas_atencion', onDelete: 'CASCADE' });
 PlanillaAtencion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+HistoriaClinica.hasMany(PlanillaAtencion, { foreignKey: 'historia_clinica_id', as: 'planillas_atencion', onDelete: 'SET NULL' });
+PlanillaAtencion.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historia_clinica' });
 
 PlanillaAtencion.hasMany(PlanillaSesion, { foreignKey: 'planilla_id', as: 'sesiones', onDelete: 'CASCADE' });
 PlanillaSesion.belongsTo(PlanillaAtencion, { foreignKey: 'planilla_id', as: 'planilla' });
 
 Paciente.hasMany(PlanillaSesion, { foreignKey: 'paciente_id', as: 'planilla_sesiones', onDelete: 'CASCADE' });
 PlanillaSesion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+Sesion.hasMany(PlanillaSesion, { foreignKey: 'sesion_id', as: 'filas_planilla', onDelete: 'SET NULL' });
+PlanillaSesion.belongsTo(Sesion, { foreignKey: 'sesion_id', as: 'sesion_registrada' });
 
 Paciente.hasMany(Cita, { foreignKey: 'paciente_id', as: 'citas', onDelete: 'RESTRICT' });
 Cita.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -118,6 +127,33 @@ PagoClinico.belongsTo(DocumentoClinico, { foreignKey: 'documento_id', as: 'docum
 Usuario.hasMany(PagoClinico, { foreignKey: 'usuario_id', as: 'pagos_clinicos', onDelete: 'SET NULL' });
 PagoClinico.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'registrado_por' });
 
+Paciente.hasMany(ConceptoCobro, { foreignKey: 'paciente_id', as: 'conceptos_cobro', onDelete: 'RESTRICT' });
+ConceptoCobro.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+HistoriaClinica.hasMany(ConceptoCobro, { foreignKey: 'historia_clinica_id', as: 'conceptos_cobro', onDelete: 'SET NULL' });
+ConceptoCobro.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historia_clinica' });
+Sesion.hasOne(ConceptoCobro, { foreignKey: 'sesion_id', as: 'concepto_cobro', onDelete: 'SET NULL' });
+ConceptoCobro.belongsTo(Sesion, { foreignKey: 'sesion_id', as: 'sesion' });
+
+ConceptoCobro.hasMany(MovimientoPago, { foreignKey: 'concepto_cobro_id', as: 'movimientos', onDelete: 'RESTRICT' });
+MovimientoPago.belongsTo(ConceptoCobro, { foreignKey: 'concepto_cobro_id', as: 'concepto' });
+Usuario.hasMany(MovimientoPago, { foreignKey: 'usuario_receptor_id', as: 'movimientos_recibidos', onDelete: 'RESTRICT' });
+MovimientoPago.belongsTo(Usuario, { foreignKey: 'usuario_receptor_id', as: 'recibido_por' });
+
+MovimientoPago.hasMany(MovimientoPagoAuditoria, { foreignKey: 'movimiento_pago_id', as: 'historial', onDelete: 'RESTRICT' });
+MovimientoPagoAuditoria.belongsTo(MovimientoPago, { foreignKey: 'movimiento_pago_id', as: 'movimiento' });
+MovimientoPagoAuditoria.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'usuario' });
+
+Usuario.hasMany(ArqueoPago, { foreignKey: 'usuario_id', as: 'arqueos_pago', onDelete: 'RESTRICT' });
+ArqueoPago.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'responsable' });
+ArqueoPago.hasMany(MovimientoPago, { foreignKey: 'arqueo_id', as: 'movimientos', onDelete: 'SET NULL' });
+MovimientoPago.belongsTo(ArqueoPago, { foreignKey: 'arqueo_id', as: 'arqueo' });
+
+Paciente.hasMany(ObservacionDiaria, { foreignKey: 'paciente_id', as: 'observaciones_diarias', onDelete: 'SET NULL' });
+ObservacionDiaria.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+Usuario.hasMany(ObservacionDiaria, { foreignKey: 'responsable_id', as: 'observaciones_responsables', onDelete: 'RESTRICT' });
+ObservacionDiaria.belongsTo(Usuario, { foreignKey: 'responsable_id', as: 'responsable' });
+ObservacionDiaria.belongsTo(Usuario, { foreignKey: 'creado_por_id', as: 'creado_por' });
+
 module.exports = {
   sequelize,
   Usuario,
@@ -143,5 +179,10 @@ module.exports = {
   TareaPersonal,
   ActividadSistema,
   DocumentoClinico,
-  PagoClinico
+  PagoClinico,
+  ConceptoCobro,
+  MovimientoPago,
+  MovimientoPagoAuditoria,
+  ArqueoPago,
+  ObservacionDiaria
 };

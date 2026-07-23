@@ -35,7 +35,7 @@ const Personal = sequelize.define(
       type: DataTypes.STRING(20),
       allowNull: false,
       defaultValue: 'mensual',
-      validate: { isIn: [['mensual', 'por_servicio']] }
+      validate: { isIn: [['mensual', 'por_servicio', 'otro']] }
     },
     telefono: DataTypes.STRING(30),
     direccion: DataTypes.TEXT,

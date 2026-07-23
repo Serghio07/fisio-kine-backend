@@ -15,11 +15,14 @@ const PlanillaPersonalDetalle = sequelize.define(
     cargo: DataTypes.STRING(120),
     horario: DataTypes.STRING(255),
     sueldo_base: DataTypes.DECIMAL(10, 2),
+    monto_servicio: DataTypes.DECIMAL(10, 2),
+    estado_laboral: DataTypes.STRING(20),
+    firma: DataTypes.STRING(255),
     tipo_pago: {
       type: DataTypes.STRING(20),
       allowNull: false,
       defaultValue: 'mensual',
-      validate: { isIn: [['mensual', 'por_servicio']] }
+      validate: { isIn: [['mensual', 'por_servicio', 'otro']] }
     }
   },
   { tableName: 'planillas_personal_detalle', timestamps: false }

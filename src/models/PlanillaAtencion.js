@@ -6,6 +6,7 @@ const PlanillaAtencion = sequelize.define(
   {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     paciente_id: { type: DataTypes.INTEGER, allowNull: false },
+    historia_clinica_id: DataTypes.INTEGER,
     fecha_inicio: DataTypes.DATEONLY,
     fecha_fin: DataTypes.DATEONLY,
     diagnostico: DataTypes.TEXT,

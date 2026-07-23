@@ -19,7 +19,11 @@
     "migrate:titulo-profesional": "node src/scripts/migrateTituloProfesional.js",
     "migrate:actividades": "node src/scripts/migrateActividadesSistema.js",
     "migrate:evolutivo": "node src/scripts/migrateEvolutivoHistoria.js",
-    "migrate:documentos": "node src/scripts/migrateDocumentosClinicos.js"
+    "migrate:sesion-evolutivo": "node src/scripts/migrateSesionEvolutivo.js",
+    "repair:cadena-dolor": "node src/scripts/recalcularCadenaDolor.js",
+    "migrate:documentos": "node src/scripts/migrateDocumentosClinicos.js",
+    "migrate:planilla-pagos": "node src/scripts/migratePlanillaPagos.js",
+    "migrate:resumen-diario": "node src/scripts/migrateResumenDiario.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
