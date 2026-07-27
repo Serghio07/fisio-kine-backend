@@ -1,4 +1,5 @@
 require('dotenv').config();
+process.env.TZ = process.env.TZ || 'America/La_Paz';
 
 const app = require('./app');
 const { sequelize } = require('./models');

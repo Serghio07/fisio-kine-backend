@@ -1,18 +1,12 @@
 const { Op } = require('sequelize');
 const { Cita, HistoriaClinica, InformeMedico, Paciente, Sesion } = require('../models');
+const { boliviaDate } = require('../utils/boliviaDateTime');
 
 const includePaciente = [{ model: Paciente, as: 'paciente' }];
 
-const fechaLocal = (date = new Date()) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
 const resumenDashboard = async (req, res, next) => {
   try {
-    const hoy = fechaLocal();
+    const hoy = boliviaDate();
     const [totalPacientes, citasHoy, sesionesHoy, atendidosHoy, citasPendientes, informesGenerados] = await Promise.all([
       Paciente.count(),
       Cita.count({ where: { fecha: hoy } }),
@@ -39,7 +33,7 @@ const proximasCitas = async (req, res, next) => {
   try {
     const citas = await Cita.findAll({
       where: {
-        fecha: { [Op.gte]: fechaLocal() },
+        fecha: { [Op.gte]: boliviaDate() },
         estado: { [Op.ne]: 'Cancelada' }
       },
       include: includePaciente,
@@ -55,7 +49,7 @@ const proximasCitas = async (req, res, next) => {
 const sesionesHoy = async (req, res, next) => {
   try {
     const sesiones = await Sesion.findAll({
-      where: { fecha: fechaLocal(), anulada: false },
+      where: { fecha: boliviaDate(), anulada: false },
       include: includePaciente,
       order: [['id', 'DESC']],
       limit: 8

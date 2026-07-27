@@ -10,10 +10,13 @@ const {
 } = require('../controllers/paciente.controller');
 const { listarPlanillasPaciente } = require('../controllers/planillaAtencion.controller');
 const { listarCitasPaciente } = require('../controllers/cita.controller');
+const { resumenPaciente, auditarResumenPaciente } = require('../controllers/resumenPaciente.controller');
 
 router.use(autenticar);
 
 router.get('/', listarPacientes);
+router.get('/:id/resumen', resumenPaciente);
+router.post('/:id/resumen/auditoria', auditarResumenPaciente);
 router.get('/:id/citas', listarCitasPaciente);
 router.get('/:id/planillas-atencion', listarPlanillasPaciente);
 router.get('/:id', obtenerPaciente);

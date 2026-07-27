@@ -16,7 +16,9 @@ const HistoriaClinica = sequelize.define(
     motivo_consulta: DataTypes.TEXT,
     enfermedad_actual: DataTypes.TEXT,
     profesional_cargo: DataTypes.STRING(150),
-    evolutivo: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    // Se conserva el atributo de API `evolutivo` por compatibilidad,
+    // pero la columna física usa la terminología clínica correcta.
+    evolutivo: { type: DataTypes.JSONB, allowNull: false, defaultValue: [], field: 'evoluciones' },
     anulada: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     anulada_en: DataTypes.DATE,
     anulada_por: DataTypes.STRING(150),

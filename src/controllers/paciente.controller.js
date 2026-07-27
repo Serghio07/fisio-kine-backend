@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { Paciente } = require('../models');
 const { validarImagen } = require('../utils/imagen');
+const { boliviaDate } = require('../utils/boliviaDateTime');
 
 const camposPaciente = [
   'nombres', 'apellidos', 'ci', 'fecha_nacimiento', 'lugar_nacimiento',
@@ -24,7 +25,7 @@ const calcularEdad = (fecha) => {
   if (!fecha) return null;
   const nacimiento = new Date(`${fecha}T00:00:00`);
   if (Number.isNaN(nacimiento.getTime())) return null;
-  const hoy = new Date();
+  const hoy = new Date(`${boliviaDate()}T12:00:00-04:00`);
   let edad = hoy.getFullYear() - nacimiento.getFullYear();
   const mes = hoy.getMonth() - nacimiento.getMonth();
   if (mes < 0 || (mes === 0 && hoy.getDate() < nacimiento.getDate())) edad -= 1;
@@ -78,7 +79,7 @@ const validarPaciente = (data) => {
   if (!/^\d+$/.test(data.ci)) return 'El CI solo puede contener números.';
   if (!/^\d{7,8}$/.test(data.telefono)) return 'El teléfono debe tener 7 u 8 dígitos.';
   if (!['MASCULINO', 'FEMENINO'].includes(data.sexo)) return 'Selecciona MASCULINO o FEMENINO.';
-  if (data.fecha_nacimiento && new Date(`${data.fecha_nacimiento}T00:00:00`) > new Date()) return 'La fecha de nacimiento no puede ser futura.';
+  if (data.fecha_nacimiento && data.fecha_nacimiento > boliviaDate()) return 'La fecha de nacimiento no puede ser futura.';
   if (data.peso !== null && data.peso !== undefined && (!Number.isFinite(data.peso) || data.peso <= 0)) return 'El peso debe ser mayor que cero.';
   if (data.talla !== null && data.talla !== undefined && (!Number.isFinite(data.talla) || data.talla <= 0)) return 'La talla debe ser mayor que cero.';
   return null;

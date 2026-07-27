@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const { Cita, ESTADOS_CITA, Paciente, Personal, TIPOS_ATENCION, Usuario } = require('../models');
+const { boliviaDate } = require('../utils/boliviaDateTime');
 
 const includeCita = [
   { model: Paciente, as: 'paciente' },
@@ -208,7 +209,7 @@ const listarCalendario = async (req, res, next) => {
 
 const listarPeriodo = (tipo) => async (req, res, next) => {
   try {
-    const hoy = new Date();
+    const hoy = new Date(`${boliviaDate()}T12:00:00-04:00`);
     const inicio = new Date(hoy);
     const fin = new Date(hoy);
 
@@ -223,8 +224,8 @@ const listarPeriodo = (tipo) => async (req, res, next) => {
       fin.setMonth(inicio.getMonth() + 1, 0);
     }
 
-    const fechaInicio = inicio.toISOString().slice(0, 10);
-    const fechaFin = fin.toISOString().slice(0, 10);
+    const fechaInicio = boliviaDate(inicio);
+    const fechaFin = boliviaDate(fin);
     const citas = await Cita.findAll({
       where: { fecha: { [Op.between]: [fechaInicio, fechaFin] } },
       include: includeCita,

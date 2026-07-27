@@ -24,6 +24,7 @@ const sincronizarConceptoSesion = async (session, transaction, { importarPago = 
       detalle: `Sesión ${session.numero_sesion}${history?.diagnostico_medico ? ` — ${history.diagnostico_medico}` : ''}`,
       monto_esperado: money(session.monto_sesion),
       profesional_responsable: session.profesional_responsable,
+      exonerado: session.estado_pago === 'Sin costo',
       activo: !session.anulada
     },
     transaction
@@ -35,6 +36,7 @@ const sincronizarConceptoSesion = async (session, transaction, { importarPago = 
     detalle: `Sesión ${session.numero_sesion}${history?.diagnostico_medico ? ` — ${history.diagnostico_medico}` : ''}`,
     monto_esperado: money(session.monto_sesion),
     profesional_responsable: session.profesional_responsable,
+    exonerado: session.estado_pago === 'Sin costo',
     activo: !session.anulada
   }, { transaction });
 
@@ -47,8 +49,8 @@ const sincronizarConceptoSesion = async (session, transaction, { importarPago = 
       fecha: session.fecha,
       hora: '12:00:00',
       monto: money(session.monto_pagado),
-      metodo: ['Efectivo', 'QR', 'Transferencia', 'Otro'].includes(session.metodo_pago) ? session.metodo_pago : 'Otro',
-      observacion: 'Pago registrado desde Sesiones',
+      metodo: ['Efectivo', 'QR', 'Transferencia', 'Tarjeta', 'Otro'].includes(session.metodo_pago) ? session.metodo_pago : 'Otro',
+      observacion: session.observacion_pago || 'Pago registrado desde Sesiones',
       numero_recibo: `REC-SES-${String(session.id).padStart(6, '0')}`,
       estado: 'Activo'
       }, { transaction });

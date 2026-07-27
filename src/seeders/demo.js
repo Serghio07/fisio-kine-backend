@@ -100,7 +100,11 @@ const pacientes = [
 const addDays = (date, days) => {
   const next = new Date(`${date}T00:00:00`);
   next.setDate(next.getDate() + days);
-  return next.toISOString().slice(0, 10);
+  return [
+    next.getFullYear(),
+    String(next.getMonth() + 1).padStart(2, '0'),
+    String(next.getDate()).padStart(2, '0')
+  ].join('-');
 };
 
 async function ensureUsuarios() {

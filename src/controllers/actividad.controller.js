@@ -17,9 +17,6 @@ const listarActividades = async (req, res, next) => {
         {
           model: Paciente,
           as: 'paciente',
-          attributes: {
-            exclude: ['foto']
-          }
         }
       ],
       order: [['fecha', 'DESC'], ['hora', 'DESC'], ['id', 'DESC']],

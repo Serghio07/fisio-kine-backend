@@ -10,11 +10,12 @@ const {
   Usuario,
   sequelize
 } = require('../models');
+const { boliviaDate, boliviaTime } = require('../utils/boliviaDateTime');
 
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 const validMethods = ['Efectivo', 'QR', 'Transferencia', 'Tarjeta', 'Otro'];
-const today = () => new Date().toISOString().slice(0, 10);
-const nowTime = () => new Date().toTimeString().slice(0, 8);
+const today = () => boliviaDate();
+const nowTime = () => boliviaTime();
 
 const includeConcepto = [
   { model: Paciente, as: 'paciente' },
@@ -133,17 +134,19 @@ const importarSesiones = async () => {
   }
 };
 
+const normalizeSearch = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
 const matches = (item, query) => {
-  const search = String(query.buscar || '').trim().toLowerCase();
+  const searchWords = normalizeSearch(query.buscar).split(/\s+/).filter(Boolean);
   if (query.desde && item.fecha_origen < query.desde) return false;
   if (query.hasta && item.fecha_origen > query.hasta) return false;
   if (query.estado && query.estado !== 'Todos' && item.estado !== query.estado) return false;
   if (query.deuda === 'true' && item.saldo_pendiente <= 0) return false;
   if (query.metodo && query.metodo !== 'Todos' && !item.movimientos.some((m) => m.estado === 'Activo' && m.metodo === query.metodo)) return false;
   if (query.receptor && !item.movimientos.some((m) => String(m.usuario_receptor_id) === String(query.receptor))) return false;
-  if (!search) return true;
-  const text = [item.paciente?.nombres, item.paciente?.apellidos, item.paciente?.ci, item.paciente?.telefono, item.historia_clinica?.diagnostico_medico, item.detalle, ...item.movimientos.flatMap((m) => [m.numero_recibo, m.numero_comprobante, m.observacion])].filter(Boolean).join(' ').toLowerCase();
-  return text.includes(search);
+  if (!searchWords.length) return true;
+  const text = normalizeSearch([item.paciente?.nombres, item.paciente?.apellidos, item.paciente?.ci, item.paciente?.telefono, item.historia_clinica?.diagnostico_medico, item.detalle, ...item.movimientos.flatMap((m) => [m.numero_recibo, m.numero_comprobante, m.observacion])].filter(Boolean).join(' '));
+  return searchWords.every((word) => text.includes(word));
 };
 
 const buildIndicators = (items) => {
@@ -196,7 +199,7 @@ exports.registrarMovimiento = async (req, res, next) => {
       usuario_receptor_id: req.body.usuario_receptor_id || req.usuario.id,
       fecha: req.body.fecha || today(), hora: req.body.hora || nowTime(), monto, metodo: req.body.metodo,
       numero_comprobante: req.body.numero_comprobante || null, archivo_comprobante: req.body.archivo_comprobante || null,
-      observacion: req.body.observacion || null, numero_recibo: `REC-${new Date().getFullYear()}-${String(Date.now()).slice(-8)}`
+      observacion: req.body.observacion || null, numero_recibo: `REC-${boliviaDate().slice(0, 4)}-${String(Date.now()).slice(-8)}`
     }, { transaction });
     await MovimientoPagoAuditoria.create({ movimiento_pago_id: movimiento.id, usuario_id: req.usuario.id, accion: 'Registro inicial', valor_nuevo: movimiento.toJSON() }, { transaction });
     const resumen = await sincronizarSesion(concepto.id, transaction);

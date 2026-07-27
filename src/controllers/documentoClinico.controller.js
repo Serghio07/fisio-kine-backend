@@ -49,7 +49,8 @@ const limpiarDatosConsentimiento = (datos = {}) => ({
 });
 
 const buildWhere = (query) => {
-  const where = { eliminado: false, activo: true };
+  const incluirAnulados = String(query.incluir_anulados || '').toLowerCase() === 'true';
+  const where = incluirAnulados ? {} : { eliminado: false, activo: true };
   if (query.tipo) where.tipo = normalizarTipo(query.tipo);
   if (query.paciente_id) {
     where[Op.or] = [
@@ -114,8 +115,16 @@ const validarDocumento = (body) => {
     for (const fila of filas) {
       if (filaFarmacoAnulada(fila)) continue;
       if (!fila.paciente_id) return 'Cada fila debe tener paciente.';
-      const tieneMedicamento = fila.diclo || fila.dexa || fila.com_b || fila.otro || fila.otro_farmaco;
+      const productos = Array.isArray(fila.productos) ? fila.productos.filter((producto) => producto.producto) : [];
+      const tieneMedicamento = productos.length || fila.diclo || fila.dexa || fila.com_b || fila.otro || fila.otro_farmaco;
       if (!tieneMedicamento) return 'Cada fila debe tener al menos un medicamento marcado.';
+      for (const producto of productos) {
+        if (producto.producto === 'Otro' && !String(producto.nombre_otro || '').trim()) return 'Especifica el nombre del fármaco.';
+        if (!(Number(producto.cantidad) > 0)) return 'La cantidad de cada fármaco debe ser mayor a cero.';
+        if (!String(producto.dosis || producto.volumen || producto.presentacion || '').trim()) return 'Registra la presentación o dosis de cada fármaco.';
+        if (!String(producto.via || '').trim()) return 'Registra la vía de administración de cada fármaco.';
+      }
+      if (!String(fila.motivo || '').trim()) return 'El motivo clínico es obligatorio.';
       if (fila.qr) fila.metodo_pago = 'QR';
       if (Number(fila.monto_bs || 0) > 0 && !fila.metodo_pago) return 'Si registras monto, selecciona metodo de pago.';
     }

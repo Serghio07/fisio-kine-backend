@@ -18,12 +18,15 @@
     "migrate:tareas-personal": "node src/scripts/migrateTareasPersonal.js",
     "migrate:titulo-profesional": "node src/scripts/migrateTituloProfesional.js",
     "migrate:actividades": "node src/scripts/migrateActividadesSistema.js",
-    "migrate:evolutivo": "node src/scripts/migrateEvolutivoHistoria.js",
+    "migrate:evoluciones": "node src/scripts/migrateEvolucionesHistoria.js",
+    "migrate:evolutivo": "node src/scripts/migrateEvolucionesHistoria.js",
     "migrate:sesion-evolutivo": "node src/scripts/migrateSesionEvolutivo.js",
+    "migrate:sesion-farmacos": "node src/scripts/migrateSesionFarmacos.js",
     "repair:cadena-dolor": "node src/scripts/recalcularCadenaDolor.js",
     "migrate:documentos": "node src/scripts/migrateDocumentosClinicos.js",
     "migrate:planilla-pagos": "node src/scripts/migratePlanillaPagos.js",
-    "migrate:resumen-diario": "node src/scripts/migrateResumenDiario.js"
+    "migrate:resumen-diario": "node src/scripts/migrateResumenDiario.js",
+    "migrate:timezone-bolivia": "node src/scripts/configurarZonaHorariaBolivia.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

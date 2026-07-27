@@ -1,6 +1,6 @@
 const { Op } = require('sequelize');
 const { randomUUID } = require('crypto');
-const { EvaluacionFinal, HistoriaClinica, IntervencionClinica, Paciente, Personal, Sesion, Usuario, sequelize } = require('../models');
+const { DocumentoClinico, EvaluacionFinal, HistoriaClinica, IntervencionClinica, Paciente, Personal, Sesion, Usuario, sequelize } = require('../models');
 const { sincronizarSemana } = require('../services/sesionSemanalSync.service');
 const { sincronizarConceptoSesion } = require('../services/planillaPagosSync.service');
 
@@ -27,12 +27,11 @@ const toMoney = (value) => Math.max(Number(value || 0), 0);
 
 const calcularPago = (body) => {
   const estadoPago = body.estado_pago || 'Pendiente';
-  const montoSesion = toMoney(body.monto_sesion);
+  const montoSesion = estadoPago === 'Sin costo' ? 0 : toMoney(body.monto_sesion);
   let montoPagado = toMoney(body.monto_pagado);
 
   if (estadoPago === 'Pagado') montoPagado = montoSesion;
-  if (estadoPago === 'Debe') montoPagado = 0;
-  if (estadoPago === 'Pendiente' && !body.monto_pagado) montoPagado = 0;
+  if (['Debe', 'Pendiente', 'Sin costo'].includes(estadoPago)) montoPagado = 0;
 
   return {
     monto_sesion: montoSesion,
@@ -41,10 +40,31 @@ const calcularPago = (body) => {
   };
 };
 
+const normalizarFarmacos = (body) => {
+  if (body.asistencia !== 'asistio' || !body.aplica_farmacos) return [];
+  const ahora = new Date().toISOString();
+  return (Array.isArray(body.farmacos) ? body.farmacos : []).map((farmaco) => ({
+    id: farmaco.id || randomUUID(),
+    nombre: String(farmaco.nombre === 'Otro' ? farmaco.nombre_otro || '' : farmaco.nombre || '').trim(),
+    tipo: farmaco.nombre === 'Otro' ? 'Otro' : farmaco.nombre,
+    presentacion_dosis: String(farmaco.presentacion_dosis || farmaco.dosis || '').trim(),
+    via: String(farmaco.via === 'Otra' ? farmaco.via_otro || '' : farmaco.via || '').trim(),
+    tipo_via: farmaco.via === 'Otra' ? 'Otra' : farmaco.via,
+    cantidad: Number(farmaco.cantidad),
+    motivo_clinico: String(farmaco.motivo_clinico || farmaco.motivo || '').trim(),
+    observacion: String(farmaco.observacion || '').trim(),
+    estado: 'activo',
+    fecha_creacion: farmaco.fecha_creacion || ahora,
+    fecha_actualizacion: ahora
+  }));
+};
+
 const normalizarSesion = (body) => {
   const asistencia = body.asistencia || 'pendiente';
   const sesionesHizo = Number(body.sesiones_hizo || 0);
   const pago = calcularPago(body);
+  const farmacos = normalizarFarmacos({ ...body, asistencia });
+  const primerFarmaco = farmacos[0];
 
   return {
     paciente_id: body.paciente_id,
@@ -54,19 +74,22 @@ const normalizarSesion = (body) => {
     sesiones_hizo: sesionesHizo,
     numero_sesion: body.numero_sesion || Math.max(sesionesHizo, 1),
     asistencia,
-    metodo_pago: body.metodo_pago || 'Pendiente',
+    metodo_pago: ['Pendiente', 'Sin costo'].includes(body.estado_pago) ? null : body.metodo_pago || null,
     estado_pago: body.estado_pago || 'Pendiente',
     ...pago,
-    aplica_farmacos: Boolean(body.aplica_farmacos),
-    observacion_farmacos: body.aplica_farmacos ? body.observacion_farmacos : null,
+    aplica_farmacos: farmacos.length > 0,
+    observacion_farmacos: farmacos.length ? farmacos.map((item) => item.observacion).filter(Boolean).join(' | ') || null : null,
+    farmacos,
+    observacion_pago: body.observacion_pago || null,
+    motivo_sin_costo: body.estado_pago === 'Sin costo' ? body.motivo_sin_costo || null : null,
     medios_fisicos: body.medios_fisicos || null,
     tecnicas_manuales: body.tecnicas_manuales || null,
     descripcion_tratamiento: body.descripcion_tratamiento || null,
     evolucion_observada: body.evolucion_observada || null,
     dolor_antes: body.dolor_antes === '' || body.dolor_antes == null ? null : Number(body.dolor_antes),
     dolor_despues: body.dolor_despues === '' || body.dolor_despues == null ? null : Number(body.dolor_despues),
-    inyectable_nombre: body.aplica_farmacos ? body.inyectable_nombre || null : null,
-    inyectable_dosis: body.aplica_farmacos ? body.inyectable_dosis || null : null,
+    inyectable_nombre: primerFarmaco?.nombre || null,
+    inyectable_dosis: primerFarmaco?.presentacion_dosis || null,
     profesional_responsable: body.profesional_responsable || null,
     observacion: body.observacion
   };
@@ -81,17 +104,105 @@ const validarSesion = (body) => {
   if (!['pendiente', 'asistio', 'no_asistio', 'cancelada', 'reprogramada'].includes(body.asistencia || 'pendiente')) {
     return 'asistencia no es valida';
   }
-  if (!['QR', 'Efectivo', 'Transferencia', 'Pendiente', 'Otro'].includes(body.metodo_pago || 'Pendiente')) {
+  if (body.metodo_pago && !['QR', 'Efectivo', 'Transferencia', 'Tarjeta', 'Otro'].includes(body.metodo_pago)) {
     return 'metodo_pago no es valido';
   }
-  if (!['Pagado', 'Pendiente', 'Parcial', 'Debe'].includes(body.estado_pago || 'Pendiente')) {
+  if (!['Pagado', 'Pendiente', 'Parcial', 'Sin costo', 'Debe'].includes(body.estado_pago || 'Pendiente')) {
     return 'estado_pago no es válido';
   }
   if (Number(body.monto_sesion || 0) < 0) return 'monto_sesion no puede ser negativo';
   if (Number(body.monto_pagado || 0) < 0) return 'monto_pagado no puede ser negativo';
   if (body.dolor_antes !== null && body.dolor_antes !== '' && (Number(body.dolor_antes) < 0 || Number(body.dolor_antes) > 10)) return 'dolor_antes debe estar entre 0 y 10';
   if (body.dolor_despues !== null && body.dolor_despues !== '' && (Number(body.dolor_despues) < 0 || Number(body.dolor_despues) > 10)) return 'dolor_despues debe estar entre 0 y 10';
+  if (body.asistencia === 'asistio') {
+    if (body.dolor_despues === null || body.dolor_despues === '') return 'dolor_despues es requerido cuando el paciente asistió';
+    if (!String(body.descripcion_tratamiento || '').trim()) return 'El procedimiento realizado es requerido cuando el paciente asistió';
+  }
+  if (body.estado_pago === 'Parcial' && !(Number(body.monto_pagado) > 0 && Number(body.monto_pagado) < Number(body.monto_sesion))) {
+    return 'En un pago parcial, el monto pagado debe ser mayor a cero y menor al monto de la sesión';
+  }
+  if (['Pagado', 'Parcial'].includes(body.estado_pago) && !body.metodo_pago) return 'Seleccione el método de pago';
+  if (body.estado_pago === 'Sin costo' && !String(body.motivo_sin_costo || '').trim()) return 'El motivo es requerido para una sesión sin costo';
+  if (body.aplica_farmacos) {
+    if (body.asistencia !== 'asistio') return 'No se pueden administrar fármacos si el paciente no asistió';
+    if (!String(body.descripcion_tratamiento || '').trim() || !String(body.evolucion_observada || body.observacion || '').trim() || body.dolor_despues === null || body.dolor_despues === '') {
+      return 'Primero registre la evolución clínica del paciente antes de administrar fármacos';
+    }
+    const farmacos = Array.isArray(body.farmacos) ? body.farmacos : [];
+    if (!farmacos.length) return 'Agregue al menos un fármaco';
+    for (const farmaco of farmacos) {
+      const nombre = String(farmaco.nombre === 'Otro' ? farmaco.nombre_otro || '' : farmaco.nombre || '').trim();
+      const dosis = String(farmaco.presentacion_dosis || farmaco.dosis || '').trim();
+      const via = String(farmaco.via === 'Otra' ? farmaco.via_otro || '' : farmaco.via || '').trim();
+      if (!nombre || !dosis || !via || !(Number(farmaco.cantidad) > 0) || !String(farmaco.motivo_clinico || farmaco.motivo || '').trim()) {
+        return 'Cada fármaco debe tener nombre, dosis, vía, cantidad mayor a cero y motivo clínico';
+      }
+    }
+  }
   return null;
+};
+
+const sincronizarDocumentoFarmacos = async (sesion, historia, transaction) => {
+  const existente = await DocumentoClinico.findOne({ where: { tipo: 'farmacos', sesion_id: sesion.id }, transaction });
+  const farmacos = Array.isArray(sesion.farmacos) ? sesion.farmacos : [];
+  const activo = !sesion.anulada && sesion.asistencia === 'asistio' && farmacos.length > 0;
+  if (!activo) {
+    if (existente) {
+      const filas = (existente.datos?.filas || []).map((fila) => ({ ...fila, estado: 'Anulado', anulado: true }));
+      await existente.update({ estado: 'Anulado', activo: false, datos: { ...existente.datos, filas } }, { transaction });
+    }
+    return;
+  }
+  const datosComunes = {
+    origen: 'sesion',
+    paciente_id: sesion.paciente_id,
+    historia_clinica_id: sesion.historia_clinica_id,
+    sesion_id: sesion.id,
+    fecha: sesion.fecha,
+    numero_sesion: sesion.numero_sesion,
+    profesional: sesion.profesional_responsable,
+    diagnostico: historia?.diagnostico_medico || '',
+    resumen_evolucion: sesion.evolucion_observada || sesion.observacion || '',
+    procedimiento_realizado: sesion.descripcion_tratamiento || '',
+    dolor_inicial: sesion.dolor_antes,
+    dolor_final: sesion.dolor_despues,
+    estado: 'Guardado',
+    anulado: false
+  };
+  const filas = farmacos.map((farmaco) => ({
+    ...datosComunes,
+    id: farmaco.id,
+    motivo: farmaco.motivo_clinico,
+    observaciones: farmaco.observacion,
+    via_administracion: farmaco.via,
+    productos: [{
+      producto: farmaco.tipo === 'Otro' ? 'Otro' : farmaco.nombre,
+      nombre_otro: farmaco.tipo === 'Otro' ? farmaco.nombre : '',
+      presentacion: farmaco.presentacion_dosis,
+      dosis: farmaco.presentacion_dosis,
+      volumen: farmaco.presentacion_dosis,
+      cantidad: farmaco.cantidad,
+      via: farmaco.via,
+      motivo_clinico: farmaco.motivo_clinico,
+      observacion: farmaco.observacion
+    }]
+  }));
+  const payload = {
+    tipo: 'farmacos',
+    paciente_id: sesion.paciente_id,
+    usuario_id: sesion.usuario_id,
+    usuario_modificacion_id: sesion.usuario_id,
+    sesion_id: sesion.id,
+    fecha: sesion.fecha,
+    estado: 'Guardado',
+    titulo: 'Administración de fármacos',
+    descripcion: 'Generado automáticamente desde la evolución clínica de la sesión.',
+    datos: { origen: 'sesion', historia_clinica_id: sesion.historia_clinica_id, filas },
+    activo: true,
+    eliminado: false
+  };
+  if (existente) await existente.update(payload, { transaction, validate: false });
+  else await DocumentoClinico.create(payload, { transaction, validate: false });
 };
 
 const sincronizarEvolutivoSesion = async (sesion, transaction) => {
@@ -103,7 +214,10 @@ const sincronizarEvolutivoSesion = async (sesion, transaction) => {
   if (index < 0 && sesion.asistencia !== 'asistio') return;
   const anterior = index >= 0 ? anteriores[index] : {};
   const tratamiento = [sesion.medios_fisicos, sesion.tecnicas_manuales, sesion.descripcion_tratamiento].filter(Boolean).join(' · ');
-  const inyectable = [sesion.inyectable_nombre, sesion.inyectable_dosis].filter(Boolean).join(' · ');
+  const farmacos = Array.isArray(sesion.farmacos) ? sesion.farmacos : [];
+  const inyectable = farmacos.length
+    ? farmacos.map((item) => [item.nombre, item.presentacion_dosis, item.via].filter(Boolean).join(' · ')).join(' | ')
+    : [sesion.inyectable_nombre, sesion.inyectable_dosis].filter(Boolean).join(' · ');
   const ahora = new Date().toISOString();
   const evolutivo = {
     ...anterior,
@@ -122,6 +236,7 @@ const sincronizarEvolutivoSesion = async (sesion, transaction) => {
     dolor_final: sesion.dolor_despues,
     inyectable_nombre: sesion.inyectable_nombre,
     inyectable_dosis: sesion.inyectable_dosis,
+    farmacos,
     inyectables: inyectable || null,
     observaciones: sesion.observacion,
     profesional_responsable: sesion.profesional_responsable,
@@ -328,6 +443,14 @@ const crearSesion = async (req, res, next) => {
       return res.status(404).json({ message: 'Paciente no encontrado' });
     }
 
+    await sequelize.query('SELECT pg_advisory_xact_lock(:paciente, :historia)', {
+      replacements: {
+        paciente: Number(req.body.paciente_id),
+        historia: Number(req.body.historia_clinica_id)
+      },
+      transaction
+    });
+
     const basePayload = normalizarSesion({ ...req.body, profesional_responsable: req.body.profesional_responsable || nombreProfesional(req.usuario) });
     const preparado = await prepararSesionConHistoria(basePayload, transaction);
     if (preparado.error) {
@@ -335,6 +458,20 @@ const crearSesion = async (req, res, next) => {
       return res.status(400).json({ message: preparado.error });
     }
     const payload = preparado.payload;
+    const duplicada = await Sesion.findOne({
+      where: {
+        paciente_id: payload.paciente_id,
+        historia_clinica_id: payload.historia_clinica_id,
+        fecha: payload.fecha,
+        numero_sesion: payload.numero_sesion,
+        anulada: false
+      },
+      transaction
+    });
+    if (duplicada) {
+      await transaction.rollback();
+      return res.status(409).json({ message: 'Esta sesión ya fue registrada. Edite el registro existente en lugar de crear otro.' });
+    }
 
     const sesion = await Sesion.create({ ...payload, usuario_id: req.usuario.id }, { transaction });
     const fechasAfectadas = await recalcularProgresoHistoria(payload.historia_clinica_id, transaction);
@@ -342,6 +479,8 @@ const crearSesion = async (req, res, next) => {
     await sincronizarConceptoSesion(sesion, transaction, { importarPago: true });
     await recalcularCadenaDolor(payload.historia_clinica_id, transaction);
     await sesion.reload({ transaction });
+    const historiaFarmacos = await HistoriaClinica.findByPk(payload.historia_clinica_id, { transaction });
+    await sincronizarDocumentoFarmacos(sesion, historiaFarmacos, transaction);
     await sincronizarFechas(fechasAfectadas, transaction);
     const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includeSesion, transaction });
     await transaction.commit();
@@ -397,6 +536,8 @@ const actualizarSesion = async (req, res, next) => {
       await recalcularCadenaDolor(origen.historia_clinica_id, transaction);
     }
     await sesion.reload({ transaction });
+    const historiaFarmacos = await HistoriaClinica.findByPk(payload.historia_clinica_id, { transaction });
+    await sincronizarDocumentoFarmacos(sesion, historiaFarmacos, transaction);
     const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includeSesion, transaction });
     await transaction.commit();
     return res.json({
@@ -432,11 +573,19 @@ const eliminarSesion = async (req, res, next) => {
       anulada_en: new Date(),
       anulada_por: nombreProfesional(req.usuario),
       motivo_anulacion: req.body.motivo_anulacion,
-      observacion_anulacion: req.body.observacion_anulacion || null
+      observacion_anulacion: req.body.observacion_anulacion || null,
+      farmacos: (Array.isArray(sesion.farmacos) ? sesion.farmacos : []).map((farmaco) => ({
+        ...farmaco,
+        estado: 'anulado',
+        motivo_anulacion: req.body.motivo_anulacion,
+        fecha_actualizacion: new Date().toISOString()
+      }))
     }, { transaction });
     await sesion.reload({ transaction });
     await sincronizarConceptoSesion(sesion, transaction);
     await sincronizarEvolutivoSesion(sesion, transaction);
+    const historiaFarmacos = await HistoriaClinica.findByPk(origen.historia_clinica_id, { transaction });
+    await sincronizarDocumentoFarmacos(sesion, historiaFarmacos, transaction);
     const fechasAfectadas = await recalcularProgresoHistoria(origen.historia_clinica_id, transaction);
     await recalcularCadenaDolor(origen.historia_clinica_id, transaction);
     fechasAfectadas.push({ paciente_id: origen.paciente_id, fecha: origen.fecha });

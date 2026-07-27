@@ -1,5 +1,6 @@
 const { PlanillaPersonal, PlanillaPersonalDetalle, Personal, Usuario, sequelize } = require('../models');
 const { ensurePlanillaPersonalSchema } = require('../services/planillaPersonalSchema.service');
+const { boliviaDate } = require('../utils/boliviaDateTime');
 
 const includeCompleto = [
   { model: Usuario, as: 'creado_por', attributes: ['id', 'nombre', 'usuario'] },
@@ -17,6 +18,14 @@ const horarioTexto = (persona) => {
     ? `${String(persona.hora_entrada).slice(0, 5)}-${String(persona.hora_salida).slice(0, 5)}`
     : '';
   return [dias, horas].filter(Boolean).join(' ');
+};
+
+const cargoCompleto = (persona) => {
+  const titulo = String(persona.titulo_profesional || '').trim();
+  const cargo = String(persona.cargo || '').trim();
+  return titulo && !cargo.toLocaleLowerCase('es-BO').startsWith(titulo.toLocaleLowerCase('es-BO'))
+    ? `${titulo} ${cargo}`.trim()
+    : cargo || titulo;
 };
 
 const montoDetalle = (detalle) => detalle.tipo_pago === 'por_servicio'
@@ -132,7 +141,7 @@ const crearPlanilla = async (req, res, next) => {
       mes,
       anio,
       usuario_id: req.usuario.id,
-      fecha_planilla: req.body.fecha_planilla || new Date().toISOString().slice(0, 10),
+      fecha_planilla: req.body.fecha_planilla || boliviaDate(),
       estado: req.body.cerrar ? 'cerrada' : 'borrador',
       cerrada_en: req.body.cerrar ? new Date() : null,
       observaciones: req.body.observaciones || null
@@ -146,7 +155,7 @@ const crearPlanilla = async (req, res, next) => {
       apellido_materno: persona.apellido_materno,
       nombres: persona.nombres,
       ci: persona.ci,
-      cargo: persona.cargo,
+      cargo: cargoCompleto(persona),
       horario: horarioTexto(persona),
       sueldo_base: persona.tipo_pago === 'por_servicio' ? null : persona.sueldo_base,
       monto_servicio: null,

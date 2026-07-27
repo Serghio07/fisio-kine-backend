@@ -1,4 +1,5 @@
 const { ActividadSistema } = require('../models');
+const { boliviaDateTime } = require('../utils/boliviaDateTime');
 
 const modulos = {
   pacientes: 'Paciente',
@@ -52,24 +53,6 @@ const detalleActividad = (modulo, accion, body) => {
   return (detalles[modulo] || `${accion} ${modulo.toLowerCase()}`).slice(0, 500);
 };
 
-const fechaHoraBolivia = () => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/La_Paz',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23'
-  }).formatToParts(new Date());
-  const get = (type) => parts.find((part) => part.type === type)?.value;
-  return {
-    fecha: `${get('year')}-${get('month')}-${get('day')}`,
-    hora: `${get('hour')}:${get('minute')}:${get('second')}`
-  };
-};
-
 const registrarActividad = (req, res, next) => {
   let respuesta;
   const jsonOriginal = res.json.bind(res);
@@ -84,7 +67,7 @@ const registrarActividad = (req, res, next) => {
     const modulo = modulos[segmento];
     if (!modulo) return;
 
-    const { fecha, hora } = fechaHoraBolivia();
+    const { fecha, hora } = boliviaDateTime();
     const entidad = respuesta?.usuario || respuesta;
     const entidadId = entidad?.id || Number(req.originalUrl.split('?')[0].split('/').filter(Boolean)[2]) || null;
     const pacienteId = req.body?.paciente_id

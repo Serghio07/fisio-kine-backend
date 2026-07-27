@@ -3,7 +3,7 @@ const { Paciente, Personal, TareaPersonal, Usuario } = require('../models');
 const include = [
   { model: Personal, as: 'personal', attributes: ['id', 'nombres', 'apellido_paterno', 'apellido_materno', 'cargo'] },
   { model: Usuario, as: 'asignado_a', attributes: ['id', 'nombre', 'usuario', 'estado'] },
-  { model: Paciente, as: 'paciente', attributes: ['id', 'nombres', 'apellidos', 'ci'] },
+  { model: Paciente, as: 'paciente', attributes: ['id', 'nombres', 'apellidos', 'ci', 'foto'] },
   {
     model: Usuario,
     as: 'creado_por',

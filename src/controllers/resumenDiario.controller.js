@@ -3,18 +3,19 @@ const {
   ActividadSistema, ConceptoCobro, HistoriaClinica, InformeMedico, MovimientoPago,
   ObservacionDiaria, Paciente, Personal, Sesion, TareaPersonal, Usuario
 } = require('../models');
+const { BOLIVIA_TIME_ZONE, boliviaDate } = require('../utils/boliviaDateTime');
 
 const boliviaRange = (fecha) => ({
   [Op.between]: [new Date(`${fecha}T00:00:00-04:00`), new Date(`${fecha}T23:59:59.999-04:00`)]
 });
-const time = (value) => value ? new Intl.DateTimeFormat('es-BO', { timeZone: 'America/La_Paz', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value)) : 'Sin hora';
+const time = (value) => value ? new Intl.DateTimeFormat('es-BO', { timeZone: BOLIVIA_TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value)) : 'Sin hora';
 const name = (patient) => [patient?.nombres, patient?.apellidos].filter(Boolean).join(' ') || 'Paciente no disponible';
 const staffName = (user) => user?.ficha_personal?.nombre_mostrado || user?.nombre || user?.usuario || 'Sin registrar';
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 const hasEvolution = (session) => Boolean(session.descripcion_tratamiento || session.evolucion_observada || session.dolor_despues !== null && session.dolor_despues !== undefined);
 
 const sessionInclude = [
-  { model: Paciente, as: 'paciente', attributes: { exclude: ['foto'] } },
+  { model: Paciente, as: 'paciente' },
   { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'fecha_evaluacion', 'diagnostico_medico', 'motivo_consulta', 'estado', 'anulada'] },
   { model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }
 ];
@@ -22,14 +23,14 @@ const sessionInclude = [
 const getDailyData = async (fecha) => {
   const [sessions, histories, reports, payments, concepts, newPatients, activities, tasks, manualObservations] = await Promise.all([
     Sesion.findAll({ where: { fecha, anulada: false }, include: sessionInclude, order: [['created_at', 'DESC']] }),
-    HistoriaClinica.findAll({ where: { created_at: boliviaRange(fecha), anulada: false }, include: [{ model: Paciente, as: 'paciente', attributes: { exclude: ['foto'] } }, { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }] }),
-    InformeMedico.findAll({ where: { fecha }, include: [{ model: Paciente, as: 'paciente', attributes: { exclude: ['foto'] } }, { model: HistoriaClinica, as: 'historia_clinica' }] }),
-    MovimientoPago.findAll({ where: { fecha, estado: 'Activo' }, include: [{ model: Usuario, as: 'recibido_por', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: ConceptoCobro, as: 'concepto', include: [{ model: Paciente, as: 'paciente', attributes: { exclude: ['foto'] } }, { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'fecha_evaluacion'] }, { model: Sesion, as: 'sesion', attributes: ['id', 'numero_sesion', 'fecha'] }, { model: MovimientoPago, as: 'movimientos', required: false, where: { estado: 'Activo' } }] }], order: [['hora', 'DESC']] }),
-    ConceptoCobro.findAll({ where: { activo: true }, include: [{ model: Paciente, as: 'paciente', attributes: { exclude: ['foto'] } }, { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'fecha_evaluacion'] }, { model: Sesion, as: 'sesion', attributes: ['id', 'numero_sesion', 'fecha'] }, { model: MovimientoPago, as: 'movimientos', required: false, where: { estado: 'Activo' } }] }),
-    Paciente.findAll({ where: { created_at: boliviaRange(fecha), estado: true }, attributes: { exclude: ['foto'] } }),
-    ActividadSistema.findAll({ where: { fecha }, include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: Paciente, as: 'paciente', attributes: { exclude: ['foto'] } }], order: [['hora', 'DESC']] }),
-    TareaPersonal.findAll({ where: { fecha, estado: { [Op.ne]: 'cancelada' } }, include: [{ model: Personal, as: 'personal' }, { model: Usuario, as: 'asignado_a', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: Paciente, as: 'paciente', attributes: { exclude: ['foto'] } }] }),
-    ObservacionDiaria.findAll({ where: { fecha, activo: true }, include: [{ model: Paciente, as: 'paciente', attributes: { exclude: ['foto'] } }, { model: Usuario, as: 'responsable', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }], order: [['hora', 'DESC']] })
+    HistoriaClinica.findAll({ where: { created_at: boliviaRange(fecha), anulada: false }, include: [{ model: Paciente, as: 'paciente' }, { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }] }),
+    InformeMedico.findAll({ where: { fecha }, include: [{ model: Paciente, as: 'paciente' }, { model: HistoriaClinica, as: 'historia_clinica' }] }),
+    MovimientoPago.findAll({ where: { fecha, estado: 'Activo' }, include: [{ model: Usuario, as: 'recibido_por', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: ConceptoCobro, as: 'concepto', include: [{ model: Paciente, as: 'paciente' }, { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'fecha_evaluacion'] }, { model: Sesion, as: 'sesion', attributes: ['id', 'numero_sesion', 'fecha'] }, { model: MovimientoPago, as: 'movimientos', required: false, where: { estado: 'Activo' } }] }], order: [['hora', 'DESC']] }),
+    ConceptoCobro.findAll({ where: { activo: true }, include: [{ model: Paciente, as: 'paciente' }, { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'fecha_evaluacion'] }, { model: Sesion, as: 'sesion', attributes: ['id', 'numero_sesion', 'fecha'] }, { model: MovimientoPago, as: 'movimientos', required: false, where: { estado: 'Activo' } }] }),
+    Paciente.findAll({ where: { created_at: boliviaRange(fecha), estado: true } }),
+    ActividadSistema.findAll({ where: { fecha }, include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: Paciente, as: 'paciente' }], order: [['hora', 'DESC']] }),
+    TareaPersonal.findAll({ where: { fecha, estado: { [Op.ne]: 'cancelada' } }, include: [{ model: Personal, as: 'personal' }, { model: Usuario, as: 'asignado_a', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: Paciente, as: 'paciente' }] }),
+    ObservacionDiaria.findAll({ where: { fecha, activo: true }, include: [{ model: Paciente, as: 'paciente' }, { model: Usuario, as: 'responsable', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }], order: [['hora', 'DESC']] })
   ]);
 
   const sessionsJson = sessions.map((item) => item.toJSON());
@@ -58,7 +59,13 @@ const getDailyData = async (fecha) => {
   }).filter(Boolean).sort((a, b) => b.saldo - a.saldo);
 
   const evolutions = attentions.map((attention) => ({ ...attention, procedimiento: attention.observacion || 'Sin registrar', estado: attention.evolutivo }));
-  const drugs = sessionsJson.filter((session) => session.aplica_farmacos || session.inyectable_nombre || session.observacion_farmacos).map((session) => ({ id: session.id, hora: time(session.created_at), paciente: name(session.paciente), historia: session.historia_clinica?.diagnostico_medico || 'Sin historia', sesion: session.numero_sesion, farmaco: session.inyectable_nombre || session.observacion_farmacos || 'Fármaco registrado', dosis: session.inyectable_dosis || 'Sin registrar', via: 'Sin registrar', profesional: session.profesional_responsable || staffName(session.registrado_por), observacion: session.observacion_farmacos }));
+  const drugs = sessionsJson.flatMap((session) => {
+    if (session.anulada || session.asistencia !== 'asistio') return [];
+    const farmacos = Array.isArray(session.farmacos) ? session.farmacos.filter((item) => item.estado !== 'anulado') : [];
+    if (farmacos.length) return farmacos.map((farmaco) => ({ id: session.id, paciente_id: session.paciente_id, hora: time(session.created_at), paciente: name(session.paciente), historia: session.historia_clinica?.diagnostico_medico || 'Sin historia', sesion: session.numero_sesion, farmaco: farmaco.nombre, dosis: farmaco.presentacion_dosis || 'Sin registrar', via: farmaco.via || 'Sin registrar', profesional: session.profesional_responsable || staffName(session.registrado_por), observacion: farmaco.observacion || farmaco.motivo_clinico }));
+    if (!(session.aplica_farmacos || session.inyectable_nombre || session.observacion_farmacos)) return [];
+    return [{ id: session.id, paciente_id: session.paciente_id, hora: time(session.created_at), paciente: name(session.paciente), historia: session.historia_clinica?.diagnostico_medico || 'Sin historia', sesion: session.numero_sesion, farmaco: session.inyectable_nombre || session.observacion_farmacos || 'Fármaco registrado', dosis: session.inyectable_dosis || 'Sin registrar', via: 'Sin registrar', profesional: session.profesional_responsable || staffName(session.registrado_por), observacion: session.observacion_farmacos }];
+  });
 
   const observations = [
     ...attentions.filter((item) => item.asistencia === 'no_asistio').map((item) => ({ id: `falta-${item.id}`, hora: item.hora, categoria: 'Pacientes que faltaron', descripcion: `${item.paciente} no asistió a la sesión ${item.numero_sesion}.`, paciente: item.paciente, personal: item.profesional, estado: 'Pendiente', automatico: true })),
@@ -88,7 +95,7 @@ const getDailyData = async (fecha) => {
   };
   const alerts = [
     indicators.faltas && { tipo: 'Faltas', texto: `${indicators.faltas} paciente(s) no asistieron.` },
-    indicators.evolutivos_pendientes && { tipo: 'Evolutivos', texto: `${indicators.evolutivos_pendientes} evolutivo(s) pendientes.` },
+    indicators.evolutivos_pendientes && { tipo: 'Evoluciones', texto: `${indicators.evolutivos_pendientes} evolución(es) pendientes.` },
     debts.length && { tipo: 'Deudas', texto: `${new Set(debts.map((item) => item.paciente)).size} paciente(s) mantienen deuda.` },
     attentions.some((item) => item.asistencia === 'asistio' && item.dolor_final == null) && { tipo: 'Dolor final', texto: 'Existen sesiones sin dolor final registrado.' },
     paymentsJson.some((item) => ['QR', 'Transferencia'].includes(item.metodo) && !item.comprobante) && { tipo: 'Comprobantes', texto: 'Existen pagos electrónicos sin comprobante.' }
@@ -98,7 +105,7 @@ const getDailyData = async (fecha) => {
 
 exports.obtenerResumenDiario = async (req, res, next) => {
   try {
-    const fecha = req.query.fecha || new Date().toISOString().slice(0, 10); const section = req.query.seccion || 'resumen';
+    const fecha = req.query.fecha || boliviaDate(); const section = req.query.seccion || 'resumen';
     const data = await getDailyData(fecha);
     const counts = { resumen: 1, atenciones: data.attentions.length, pagos: data.payments.length, deudas: data.debts.length, evolutivos: data.evolutions.length, farmacos: data.drugs.length, personal: data.personnel.length, observaciones: data.observations.length };
     const response = { fecha, indicadores: data.indicators, contadores: counts };

@@ -9,7 +9,11 @@ const parseDateOnly = (value) => {
   return new Date(Date.UTC(year, month - 1, day));
 };
 
-const formatDateOnly = (date) => date.toISOString().slice(0, 10);
+const formatDateOnly = (date) => [
+  date.getUTCFullYear(),
+  String(date.getUTCMonth() + 1).padStart(2, '0'),
+  String(date.getUTCDate()).padStart(2, '0')
+].join('-');
 
 const normalizarSexoRegistro = (sexo) => {
   const value = String(sexo || '').toLocaleUpperCase('es-BO');

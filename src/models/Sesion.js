@@ -32,10 +32,9 @@ const Sesion = sequelize.define(
     },
     metodo_pago: {
       type: DataTypes.STRING(30),
-      allowNull: false,
-      defaultValue: 'Pendiente',
+      allowNull: true,
       validate: {
-        isIn: [['QR', 'Efectivo', 'Transferencia', 'Pendiente', 'Otro']]
+        isIn: [['QR', 'Efectivo', 'Transferencia', 'Tarjeta', 'Otro']]
       }
     },
     estado_pago: {
@@ -43,7 +42,7 @@ const Sesion = sequelize.define(
       allowNull: false,
       defaultValue: 'Pendiente',
       validate: {
-        isIn: [['Pagado', 'Pendiente', 'Parcial', 'Debe']]
+        isIn: [['Pagado', 'Pendiente', 'Parcial', 'Sin costo', 'Debe']]
       }
     },
     monto_sesion: {
@@ -70,6 +69,9 @@ const Sesion = sequelize.define(
       defaultValue: false
     },
     observacion_farmacos: DataTypes.TEXT,
+    farmacos: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+    observacion_pago: DataTypes.TEXT,
+    motivo_sin_costo: DataTypes.TEXT,
     medios_fisicos: DataTypes.TEXT,
     tecnicas_manuales: DataTypes.TEXT,
     descripcion_tratamiento: DataTypes.TEXT,

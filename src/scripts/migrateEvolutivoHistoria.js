@@ -6,7 +6,7 @@ const migrate = async () => {
     await sequelize.authenticate();
     await sequelize.query(`
       ALTER TABLE historias_clinicas
-      ADD COLUMN IF NOT EXISTS evolutivo JSONB NOT NULL DEFAULT '[]'::jsonb
+      ADD COLUMN IF NOT EXISTS evoluciones JSONB NOT NULL DEFAULT '[]'::jsonb
     `);
     await sequelize.query("ALTER TABLE historias_clinicas ALTER COLUMN estado DROP DEFAULT");
     await sequelize.query("ALTER TABLE historias_clinicas ALTER COLUMN estado TYPE VARCHAR(10) USING estado::text");
@@ -22,9 +22,9 @@ const migrate = async () => {
         ELSE 'DISMINUIDO'
       END
     `);
-    console.log('Evolutivo habilitado en historias clinicas.');
+    console.log('Evolución habilitado en historias clinicas.');
   } catch (error) {
-    console.error('No se pudo habilitar el evolutivo:', error.message);
+    console.error('No se pudo habilitar la evolución:', error.message);
     process.exitCode = 1;
   } finally {
     await sequelize.close();
