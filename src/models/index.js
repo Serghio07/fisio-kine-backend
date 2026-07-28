@@ -85,6 +85,12 @@ Paciente.hasMany(Cita, { foreignKey: 'paciente_id', as: 'citas', onDelete: 'REST
 Cita.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
 Usuario.hasMany(Cita, { foreignKey: 'usuario_id', as: 'citas_registradas', onDelete: 'SET NULL' });
 Cita.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'registrado_por' });
+HistoriaClinica.hasMany(Cita, { foreignKey: 'historia_clinica_id', as: 'programaciones' });
+Cita.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historia_clinica' });
+Usuario.hasMany(Cita, { foreignKey: 'profesional_id', as: 'agenda_profesional' });
+Cita.belongsTo(Usuario, { foreignKey: 'profesional_id', as: 'profesional' });
+Sesion.hasOne(Cita, { foreignKey: 'sesion_id', as: 'programacion' });
+Cita.belongsTo(Sesion, { foreignKey: 'sesion_id', as: 'sesion_clinica' });
 
 Usuario.hasOne(Personal, { foreignKey: 'usuario_id', as: 'ficha_personal', onDelete: 'SET NULL' });
 Personal.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'usuario' });

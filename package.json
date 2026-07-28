@@ -27,6 +27,8 @@
     "migrate:planilla-pagos": "node src/scripts/migratePlanillaPagos.js",
     "migrate:resumen-diario": "node src/scripts/migrateResumenDiario.js",
     "migrate:timezone-bolivia": "node src/scripts/configurarZonaHorariaBolivia.js"
+    ,
+    "migrate:programacion-sesiones": "node src/scripts/migrateProgramacionSesiones.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

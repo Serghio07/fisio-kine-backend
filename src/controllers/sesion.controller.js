@@ -1,6 +1,6 @@
 const { Op } = require('sequelize');
 const { randomUUID } = require('crypto');
-const { DocumentoClinico, EvaluacionFinal, HistoriaClinica, IntervencionClinica, Paciente, Personal, Sesion, Usuario, sequelize } = require('../models');
+const { Cita, DocumentoClinico, EvaluacionFinal, HistoriaClinica, IntervencionClinica, Paciente, Personal, Sesion, Usuario, sequelize } = require('../models');
 const { sincronizarSemana } = require('../services/sesionSemanalSync.service');
 const { sincronizarConceptoSesion } = require('../services/planillaPagosSync.service');
 
@@ -451,13 +451,33 @@ const crearSesion = async (req, res, next) => {
       transaction
     });
 
-    const basePayload = normalizarSesion({ ...req.body, profesional_responsable: req.body.profesional_responsable || nombreProfesional(req.usuario) });
+    let programacion = null;
+    if (req.body.cita_id) {
+      programacion = await Cita.findOne({
+        where: { id: req.body.cita_id, paciente_id: req.body.paciente_id, historia_clinica_id: req.body.historia_clinica_id },
+        transaction, lock: transaction.LOCK.UPDATE
+      });
+      if (!programacion || !['Programada', 'Confirmada'].includes(programacion.estado)) {
+        await transaction.rollback();
+        return res.status(409).json({ message: 'La programacion no existe, ya fue atendida o no pertenece a esta historia clinica' });
+      }
+      if (programacion.sesion_id) {
+        await transaction.rollback();
+        return res.status(409).json({ message: 'Esta programacion ya tiene una sesion clinica registrada' });
+      }
+    }
+    const basePayload = normalizarSesion({
+      ...req.body,
+      fecha: programacion?.fecha || req.body.fecha,
+      numero_sesion: programacion?.numero_sesion || req.body.numero_sesion,
+      profesional_responsable: req.body.profesional_responsable || nombreProfesional(req.usuario)
+    });
     const preparado = await prepararSesionConHistoria(basePayload, transaction);
     if (preparado.error) {
       await transaction.rollback();
       return res.status(400).json({ message: preparado.error });
     }
-    const payload = preparado.payload;
+    const payload = { ...preparado.payload, numero_sesion: programacion?.numero_sesion || preparado.payload.numero_sesion };
     const duplicada = await Sesion.findOne({
       where: {
         paciente_id: payload.paciente_id,
@@ -474,6 +494,12 @@ const crearSesion = async (req, res, next) => {
     }
 
     const sesion = await Sesion.create({ ...payload, usuario_id: req.usuario.id }, { transaction });
+    if (programacion) {
+      await programacion.update({
+        sesion_id: sesion.id,
+        estado: payload.asistencia === 'asistio' ? 'Atendida' : payload.asistencia === 'no_asistio' ? 'Falto' : programacion.estado
+      }, { transaction });
+    }
     const fechasAfectadas = await recalcularProgresoHistoria(payload.historia_clinica_id, transaction);
     await sesion.reload({ transaction });
     await sincronizarConceptoSesion(sesion, transaction, { importarPago: true });

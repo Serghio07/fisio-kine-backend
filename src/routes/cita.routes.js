@@ -12,6 +12,7 @@ const {
   listarCitasMes,
   listarCitasSemana,
   obtenerCita
+  , obtenerProgramacionHistoria, validarDisponibilidad, crearProgramacion
 } = require('../controllers/cita.controller');
 
 router.use(autenticar);
@@ -21,6 +22,9 @@ router.get('/calendario', listarCalendario);
 router.get('/hoy', listarCitasHoy);
 router.get('/semana', listarCitasSemana);
 router.get('/mes', listarCitasMes);
+router.get('/programacion/historia/:id', obtenerProgramacionHistoria);
+router.post('/programacion/historia/:id', autorizarRoles('admin', 'personal'), crearProgramacion);
+router.post('/disponibilidad', autorizarRoles('admin', 'personal'), validarDisponibilidad);
 router.get('/:id', obtenerCita);
 router.post('/', autorizarRoles('admin', 'personal'), crearCita);
 router.put('/:id', autorizarRoles('admin', 'personal'), actualizarCita);
