@@ -22,15 +22,19 @@ const actividadRoutes = require('./routes/actividad.routes');
 const planillaPagosRoutes = require('./routes/planillaPagos.routes');
 const resumenDiarioRoutes = require('./routes/resumenDiario.routes');
 const registrarActividad = require('./middlewares/actividad.middleware');
+const blogRoutes = require('./routes/blog.routes');
+const blogCategoryRoutes = require('./routes/blogCategory.routes');
+const publicBlogRoutes = require('./routes/publicBlog.routes');
+const path = require('path');
 
 const app = express();
 
-const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3001')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
@@ -42,6 +46,7 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(morgan('dev'));
 app.use(registrarActividad);
+app.use('/uploads', express.static(path.resolve(__dirname, '../uploads'), { maxAge: '1d', fallthrough: false }));
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'Physio Active API' });
@@ -65,12 +70,17 @@ app.use('/api/documentos-clinicos', documentoClinicoRoutes);
 app.use('/api/actividades', actividadRoutes);
 app.use('/api/planilla-pagos', planillaPagosRoutes);
 app.use('/api/resumen-diario', resumenDiarioRoutes);
+app.use('/api/blogs', blogRoutes);
+app.use('/api/blog-categories', blogCategoryRoutes);
+app.use('/api/public/blog', publicBlogRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });
 });
 
 app.use((error, req, res, next) => {
+  if (error.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ message: 'La imagen no puede superar 5 MB.' });
+  if (error.status) return res.status(error.status).json({ message: error.message, errors: error.errors });
   if (error.name === 'SequelizeValidationError' || error.name === 'SequelizeUniqueConstraintError') {
     return res.status(400).json({
       message: 'Error de validacion',

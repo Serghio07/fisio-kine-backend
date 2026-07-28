@@ -26,6 +26,10 @@ const MovimientoPago = require('./MovimientoPago');
 const MovimientoPagoAuditoria = require('./MovimientoPagoAuditoria');
 const ArqueoPago = require('./ArqueoPago');
 const ObservacionDiaria = require('./ObservacionDiaria');
+const BlogCategory = require('./BlogCategory');
+const BlogPost = require('./BlogPost');
+const BlogTag = require('./BlogTag');
+const BlogPostTag = require('./BlogPostTag');
 
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -160,6 +164,15 @@ Usuario.hasMany(ObservacionDiaria, { foreignKey: 'responsable_id', as: 'observac
 ObservacionDiaria.belongsTo(Usuario, { foreignKey: 'responsable_id', as: 'responsable' });
 ObservacionDiaria.belongsTo(Usuario, { foreignKey: 'creado_por_id', as: 'creado_por' });
 
+BlogCategory.hasMany(BlogPost, { foreignKey: 'categoriaId', as: 'articulos', onDelete: 'RESTRICT' });
+BlogPost.belongsTo(BlogCategory, { foreignKey: 'categoriaId', as: 'categoria' });
+Usuario.hasMany(BlogPost, { foreignKey: 'autorId', as: 'articulos_blog', onDelete: 'RESTRICT' });
+BlogPost.belongsTo(Usuario, { foreignKey: 'autorId', as: 'autor' });
+BlogPost.belongsTo(Usuario, { foreignKey: 'modificadoPorId', as: 'modificado_por' });
+BlogPost.belongsTo(Usuario, { foreignKey: 'publicadoPorId', as: 'publicado_por' });
+BlogPost.belongsToMany(BlogTag, { through: BlogPostTag, foreignKey: 'blog_post_id', otherKey: 'blog_tag_id', as: 'etiquetas' });
+BlogTag.belongsToMany(BlogPost, { through: BlogPostTag, foreignKey: 'blog_tag_id', otherKey: 'blog_post_id', as: 'articulos' });
+
 module.exports = {
   sequelize,
   Usuario,
@@ -190,5 +203,9 @@ module.exports = {
   MovimientoPago,
   MovimientoPagoAuditoria,
   ArqueoPago,
-  ObservacionDiaria
+  ObservacionDiaria,
+  BlogCategory,
+  BlogPost,
+  BlogTag,
+  BlogPostTag
 };

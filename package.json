@@ -26,9 +26,10 @@
     "migrate:documentos": "node src/scripts/migrateDocumentosClinicos.js",
     "migrate:planilla-pagos": "node src/scripts/migratePlanillaPagos.js",
     "migrate:resumen-diario": "node src/scripts/migrateResumenDiario.js",
-    "migrate:timezone-bolivia": "node src/scripts/configurarZonaHorariaBolivia.js"
-    ,
-    "migrate:programacion-sesiones": "node src/scripts/migrateProgramacionSesiones.js"
+    "migrate:timezone-bolivia": "node src/scripts/configurarZonaHorariaBolivia.js",
+    "migrate:programacion-sesiones": "node src/scripts/migrateProgramacionSesiones.js",
+    "migrate:blog": "node src/scripts/migrateBlog.js"
+    ,"seed:blog": "node src/seeders/blog.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -38,8 +39,10 @@
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
+    "multer": "^2.2.0",
     "pg": "^8.13.1",
     "pg-hstore": "^2.3.4",
+    "sanitize-html": "^2.17.6",
     "sequelize": "^6.37.5"
   },
   "devDependencies": {
