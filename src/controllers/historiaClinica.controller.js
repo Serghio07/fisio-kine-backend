@@ -12,6 +12,7 @@ const {
   Personal
 } = require('../models');
 const { randomUUID } = require('crypto');
+const { Op } = require('sequelize');
 
 const includeCompleto = [
   { model: Paciente, as: 'paciente' },
@@ -108,6 +109,18 @@ const resolverProfesional = async (req, transaction) => {
 const nombreProfesional = (profesional) =>
   profesional.ficha_personal?.nombre_mostrado || profesional.nombre;
 
+const incluirHistoriasAnuladas = (query = {}) =>
+  String(query.incluir_anuladas || '').toLowerCase() === 'true';
+
+const whereHistoriasActivas = (query = {}) => (
+  incluirHistoriasAnuladas(query)
+    ? {}
+    : {
+        anulada: false,
+        estado: { [Op.ne]: 'anulada' }
+      }
+);
+
 const validarHistoria = (body, partial = false) => {
   if (!partial && !body.paciente_id) return 'paciente_id es requerido';
   if (!partial && !body.fecha_evaluacion) return 'fecha_evaluacion es requerida';
@@ -162,6 +175,7 @@ const prepararEvolutivo = (sesiones, historia, anteriores = []) => {
 const listarHistorias = async (req, res, next) => {
   try {
     const historias = await HistoriaClinica.findAll({
+      where: whereHistoriasActivas(req.usuario.rol === 'admin' ? req.query : {}),
       include: includeCompleto,
       order: [['id', 'DESC']],
       limit: 500
@@ -175,7 +189,9 @@ const listarHistorias = async (req, res, next) => {
 const obtenerHistoria = async (req, res, next) => {
   try {
     const historia = await HistoriaClinica.findByPk(req.params.id, { include: includeCompleto });
-    if (!historia) return res.status(404).json({ message: 'Historia clinica no encontrada' });
+    if (!historia || (req.usuario.rol !== 'admin' && (historia.anulada || historia.estado === 'anulada'))) {
+      return res.status(404).json({ message: 'Historia clinica no encontrada' });
+    }
     return res.json(historia);
   } catch (error) {
     return next(error);
@@ -185,7 +201,10 @@ const obtenerHistoria = async (req, res, next) => {
 const listarHistoriasPorPaciente = async (req, res, next) => {
   try {
     const historias = await HistoriaClinica.findAll({
-      where: { paciente_id: req.params.pacienteId },
+      where: {
+        paciente_id: req.params.pacienteId,
+        ...whereHistoriasActivas(req.usuario.rol === 'admin' ? req.query : {})
+      },
       include: includeCompleto,
       order: [['id', 'DESC']]
     });

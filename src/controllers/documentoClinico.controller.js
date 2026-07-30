@@ -1,4 +1,5 @@
 const { Op } = require('sequelize');
+const { FINANCIAL_KEYS } = require('../middlewares/financialAccess.middleware');
 const {
   sequelize,
   DocumentoClinico,
@@ -35,6 +36,43 @@ const includeHistoria = [
 const normalizarTipo = (value) => String(value || '').trim();
 const esFechaValida = (value) => !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
 const filaFarmacoAnulada = (fila = {}) => Boolean(fila.anulado) || String(fila.estado || '').toLowerCase() === 'anulado';
+const historiaActivaWhere = {
+  anulada: false,
+  estado: { [Op.ne]: 'anulada' }
+};
+
+const validarHistoriasSeleccionadas = async (body, transaction) => {
+  const referencias = [];
+  if (body.historia_clinica_id) {
+    referencias.push({
+      historiaId: body.historia_clinica_id,
+      pacienteId: body.paciente_id
+    });
+  }
+
+  if (normalizarTipo(body.tipo) === 'farmacos') {
+    (body.datos?.filas || [])
+      .filter((fila) => !filaFarmacoAnulada(fila) && fila.historia_clinica_id)
+      .forEach((fila) => referencias.push({
+        historiaId: fila.historia_clinica_id,
+        pacienteId: fila.paciente_id
+      }));
+  }
+
+  for (const referencia of referencias) {
+    const historia = await HistoriaClinica.findOne({
+      where: {
+        id: referencia.historiaId,
+        paciente_id: referencia.pacienteId,
+        ...historiaActivaWhere
+      },
+      transaction
+    });
+    if (!historia) return 'La historia clínica seleccionada está anulada o no pertenece al paciente.';
+  }
+
+  return null;
+};
 
 const limpiarDatosConsentimiento = (datos = {}) => ({
   nombre_completo: datos.nombre_completo || '',
@@ -48,8 +86,8 @@ const limpiarDatosConsentimiento = (datos = {}) => ({
   firma_representante: datos.firma_representante || ''
 });
 
-const buildWhere = (query) => {
-  const incluirAnulados = String(query.incluir_anulados || '').toLowerCase() === 'true';
+const buildWhere = (query, role) => {
+  const incluirAnulados = role === 'admin' && String(query.incluir_anulados || '').toLowerCase() === 'true';
   const where = incluirAnulados ? {} : { eliminado: false, activo: true };
   if (query.tipo) where.tipo = normalizarTipo(query.tipo);
   if (query.paciente_id) {
@@ -81,6 +119,28 @@ const pickDocumento = (body, req) => ({
   descripcion: body.descripcion || null,
   datos: normalizarTipo(body.tipo) === 'consentimiento' ? limpiarDatosConsentimiento(body.datos) : body.datos || {}
 });
+
+const restaurarDatosFinancieros = (anterior, recibido) => {
+  if (Array.isArray(recibido)) {
+    const anteriores = Array.isArray(anterior) ? anterior : [];
+    return recibido.map((item, index) => {
+      const previo = item?.id
+        ? anteriores.find((candidate) => String(candidate?.id) === String(item.id))
+        : anteriores[index];
+      return restaurarDatosFinancieros(previo, item);
+    });
+  }
+  if (!recibido || typeof recibido !== 'object') return recibido;
+  const previo = anterior && typeof anterior === 'object' ? anterior : {};
+  const resultado = Object.entries(recibido).reduce((acc, [key, value]) => {
+    acc[key] = restaurarDatosFinancieros(previo[key], value);
+    return acc;
+  }, {});
+  Object.entries(previo).forEach(([key, value]) => {
+    if (FINANCIAL_KEYS.has(String(key).toLowerCase())) resultado[key] = value;
+  });
+  return resultado;
+};
 
 const validarDocumento = (body) => {
   const tipo = normalizarTipo(body.tipo);
@@ -165,7 +225,7 @@ const upsertPagoFarmaco = async (documento, body, transaction) => {
 const listarDocumentos = async (req, res, next) => {
   try {
     const documentos = await DocumentoClinico.findAll({
-      where: buildWhere(req.query),
+      where: buildWhere(req.query, req.usuario.rol),
       include: includeDocumento,
       order: [['fecha', 'DESC'], ['id', 'DESC']]
     });
@@ -191,7 +251,10 @@ const autocompletarPaciente = async (req, res, next) => {
     if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado' });
 
     const historia = await HistoriaClinica.findOne({
-      where: { paciente_id: paciente.id },
+      where: {
+        paciente_id: paciente.id,
+        ...historiaActivaWhere
+      },
       include: includeHistoria,
       order: [['fecha_evaluacion', 'DESC'], ['id', 'DESC']]
     });
@@ -206,11 +269,13 @@ const autocompletarPaciente = async (req, res, next) => {
       order: [['fecha', 'DESC'], ['id', 'DESC']],
       limit: 20
     });
-    const pagos = await PagoClinico.findAll({
-      where: { paciente_id: paciente.id, activo: true },
-      order: [['fecha', 'DESC'], ['id', 'DESC']],
-      limit: 20
-    });
+    const pagos = req.usuario.rol === 'admin'
+      ? await PagoClinico.findAll({
+        where: { paciente_id: paciente.id, activo: true },
+        order: [['fecha', 'DESC'], ['id', 'DESC']],
+        limit: 20
+      })
+      : [];
 
     const antecedentes = historia?.antecedente_personal;
     const antecedentesPatologicos = [
@@ -264,9 +329,14 @@ const crearDocumento = async (req, res, next) => {
       await transaction.rollback();
       return res.status(404).json({ message: 'Paciente no encontrado' });
     }
+    const errorHistoria = await validarHistoriasSeleccionadas(body, transaction);
+    if (errorHistoria) {
+      await transaction.rollback();
+      return res.status(400).json({ message: errorHistoria });
+    }
 
     const documento = await DocumentoClinico.create(pickDocumento(body, req), { transaction });
-    await upsertPagoFarmaco(documento, body, transaction);
+    if (req.usuario.rol === 'admin') await upsertPagoFarmaco(documento, body, transaction);
     await transaction.commit();
 
     const completo = await DocumentoClinico.findByPk(documento.id, { include: includeDocumento });
@@ -286,15 +356,30 @@ const actualizarDocumento = async (req, res, next) => {
       return res.status(404).json({ message: 'Documento no encontrado' });
     }
 
-    const body = { ...documento.toJSON(), ...req.body, tipo: documento.tipo, usuario_id: documento.usuario_id || req.usuario.id };
+    const datosRecibidos = req.body.datos || documento.datos || {};
+    const datos = req.usuario.rol === 'personal'
+      ? restaurarDatosFinancieros(documento.datos || {}, datosRecibidos)
+      : datosRecibidos;
+    const body = {
+      ...documento.toJSON(),
+      ...req.body,
+      datos,
+      tipo: documento.tipo,
+      usuario_id: documento.usuario_id || req.usuario.id
+    };
     const errorValidacion = validarDocumento(body);
     if (errorValidacion) {
       await transaction.rollback();
       return res.status(400).json({ message: errorValidacion });
     }
+    const errorHistoria = await validarHistoriasSeleccionadas(body, transaction);
+    if (errorHistoria) {
+      await transaction.rollback();
+      return res.status(400).json({ message: errorHistoria });
+    }
 
     await documento.update(pickDocumento(body, req), { transaction });
-    await upsertPagoFarmaco(documento, body, transaction);
+    if (req.usuario.rol === 'admin') await upsertPagoFarmaco(documento, body, transaction);
     await transaction.commit();
 
     const completo = await DocumentoClinico.findByPk(documento.id, { include: includeDocumento });

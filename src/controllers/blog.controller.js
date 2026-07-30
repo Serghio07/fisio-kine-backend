@@ -61,8 +61,7 @@ const validatePublish = async (post) => {
   const required = [
     ['titulo', 'El título es obligatorio.'], ['slug', 'El slug es obligatorio.'],
     ['resumen', 'El resumen es obligatorio.'], ['contenido', 'El contenido es obligatorio.'],
-    ['imagenPortada', 'La imagen de portada es obligatoria.'], ['imagenAlt', 'El texto alternativo es obligatorio.'],
-    ['categoriaId', 'La categoría es obligatoria.']
+    ['imagenPortada', 'La imagen de portada es obligatoria.']
   ];
   const errors = required.filter(([field]) => !post[field] || (field === 'contenido' && !plainText(post[field]))).map(([, message]) => message);
   if (post.resumen && (post.resumen.length < 40 || post.resumen.length > 300)) errors.push('El resumen debe tener entre 40 y 300 caracteres.');
@@ -153,9 +152,14 @@ exports.update = async (req, res, next) => {
 
 const changeStatus = (estado) => async (req, res, next) => {
   try {
-    if (!isAdmin(req)) return res.status(403).json({ message: 'Solo un administrador puede cambiar este estado.' });
     const post = await BlogPost.findByPk(req.params.id);
     if (!post) return res.status(404).json({ message: 'Artículo no encontrado.' });
+    const personalCanPublishOwnDraft = estado === 'PUBLICADO'
+      && post.autorId === req.user.id
+      && post.estado === 'BORRADOR';
+    if (!isAdmin(req) && !personalCanPublishOwnDraft) {
+      return res.status(403).json({ message: 'No tienes permiso para cambiar este estado.' });
+    }
     const changes = { estado, modificadoPorId: req.user.id };
     if (estado === 'PUBLICADO') {
       await validatePublish(post);
@@ -200,7 +204,14 @@ exports.upload = (req, res) => {
 };
 
 exports.listCategories = async (req, res, next) => {
-  try { res.json(await BlogCategory.findAll({ order: [['nombre', 'ASC']], paranoid: req.query.incluirEliminadas !== 'true' })); } catch (error) { next(error); }
+  try {
+    const admin = isAdmin(req);
+    res.json(await BlogCategory.findAll({
+      ...(admin ? {} : { where: { activo: true } }),
+      order: [['nombre', 'ASC']],
+      paranoid: !admin || req.query.incluirEliminadas !== 'true'
+    }));
+  } catch (error) { next(error); }
 };
 exports.createCategory = async (req, res, next) => {
   try {

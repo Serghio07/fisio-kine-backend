@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const autenticar = require('../middlewares/auth.middleware');
+const { filtrarRespuestaFinanciera } = require('../middlewares/financialAccess.middleware');
 const {
   pacientesRecientes,
   proximasCitas,
@@ -7,7 +8,7 @@ const {
   sesionesHoy
 } = require('../controllers/dashboard.controller');
 
-router.use(autenticar);
+router.use(autenticar, filtrarRespuestaFinanciera);
 
 router.get('/resumen', resumenDashboard);
 router.get('/proximas-citas', proximasCitas);

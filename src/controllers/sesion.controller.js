@@ -556,7 +556,9 @@ const actualizarSesion = async (req, res, next) => {
       await sincronizarSemana(payload.paciente_id, payload.fecha, transaction);
     }
     await sesion.reload({ transaction });
-    await sincronizarConceptoSesion(sesion, transaction);
+    if (req.usuario.rol === 'admin') {
+      await sincronizarConceptoSesion(sesion, transaction);
+    }
     await recalcularCadenaDolor(payload.historia_clinica_id, transaction);
     if (String(origen.historia_clinica_id) !== String(payload.historia_clinica_id)) {
       await recalcularCadenaDolor(origen.historia_clinica_id, transaction);

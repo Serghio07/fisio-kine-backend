@@ -41,7 +41,10 @@ const resumenPaciente = async (req, res, next) => {
     const pacienteId = paciente.id;
     const [historias, sesiones, citas, conceptos, documentos, informes, planillas] = await Promise.all([
       HistoriaClinica.findAll({
-        where: { paciente_id: pacienteId },
+        where: {
+          paciente_id: pacienteId,
+          ...(req.usuario.rol === 'admin' ? {} : { anulada: false })
+        },
         include: [
           { model: CondicionActual, as: 'condicion_actual' },
           { model: IntervencionClinica, as: 'intervencion_clinica' },
@@ -51,7 +54,7 @@ const resumenPaciente = async (req, res, next) => {
         order: [['fecha_evaluacion', 'DESC'], ['id', 'DESC']]
       }),
       Sesion.findAll({
-        where: { paciente_id: pacienteId },
+        where: { paciente_id: pacienteId, anulada: false },
         include: [
           { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'fecha_evaluacion', 'diagnostico_medico', 'motivo_consulta', 'estado', 'anulada'] },
           { model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre', 'usuario', 'foto'] }
@@ -63,7 +66,7 @@ const resumenPaciente = async (req, res, next) => {
         include: [{ model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre', 'usuario', 'foto'] }],
         order: [['fecha', 'DESC'], ['hora_inicio', 'DESC']]
       }),
-      ConceptoCobro.findAll({
+      req.usuario.rol === 'admin' ? ConceptoCobro.findAll({
         where: { paciente_id: pacienteId },
         include: [
           { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'motivo_consulta', 'estado'] },
@@ -74,9 +77,12 @@ const resumenPaciente = async (req, res, next) => {
           }
         ],
         order: [['fecha_origen', 'DESC'], ['id', 'DESC']]
-      }),
+      }) : Promise.resolve([]),
       DocumentoClinico.findAll({
-        where: { paciente_id: pacienteId },
+        where: {
+          paciente_id: pacienteId,
+          ...(req.usuario.rol === 'admin' ? {} : { eliminado: false, activo: true })
+        },
         include: [{ model: Usuario, as: 'creado_por', attributes: ['id', 'nombre', 'usuario', 'foto'] }],
         order: [['fecha', 'DESC'], ['id', 'DESC']]
       }),
@@ -93,7 +99,12 @@ const resumenPaciente = async (req, res, next) => {
     ]);
 
     const sesionesReales = consolidarSesionesReales(sesiones, conceptos);
-    await registrarAuditoria(req, pacienteId, 'Consultó', `Consultó el resumen clínico y económico del paciente ${paciente.nombres} ${paciente.apellidos || ''}`.trim());
+    await registrarAuditoria(
+      req,
+      pacienteId,
+      'Consultó',
+      `Consultó el resumen ${req.usuario.rol === 'admin' ? 'clínico y económico' : 'clínico'} del paciente ${paciente.nombres} ${paciente.apellidos || ''}`.trim()
+    );
     return res.json({
       paciente,
       historias,

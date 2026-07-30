@@ -21,6 +21,17 @@ const Paciente = sequelize.define(
     estado_civil: DataTypes.STRING(50),
     ocupacion: DataTypes.STRING(120),
     referencia: DataTypes.TEXT,
+    estado_registro: DataTypes.STRING(30),
+    origen_registro: DataTypes.STRING(30),
+    origen_registro_detalle: DataTypes.STRING(50),
+    datos_clinicos_estado: DataTypes.STRING(30),
+    tipo_documento: DataTypes.STRING(30),
+    ci_numero: DataTypes.STRING(30),
+    ci_complemento: DataTypes.STRING(15),
+    ci_expedido: DataTypes.STRING(20),
+    telefono_normalizado: DataTypes.STRING(30),
+    email: DataTypes.STRING(180),
+    consentimiento_datos_en: DataTypes.DATE,
     estado: { type: DataTypes.BOOLEAN, defaultValue: true }
   },
   { tableName: 'pacientes' }

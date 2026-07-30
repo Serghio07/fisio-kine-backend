@@ -11,7 +11,7 @@ const sanitizeBlogHtml = (html = '') => sanitizeHtml(String(html), {
   allowedTags: ['p', 'br', 'h2', 'h3', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'a', 'blockquote', 'hr', 'img'],
   allowedAttributes: {
     a: ['href', 'target', 'rel'],
-    img: ['src', 'alt', 'title']
+    img: ['src', 'alt', 'title', 'width', 'data-alignment']
   },
   allowedSchemes: ['http', 'https'],
   transformTags: {

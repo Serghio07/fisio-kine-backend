@@ -1,5 +1,12 @@
 node_modules/
 .env
+.env.*
+!.env.example
+!.env.whatsapp-test.example
 npm-debug.log*
 logs/
 *.log
+/backups/
+/credentials/
+*.credentials.json
+*.secret

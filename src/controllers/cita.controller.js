@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { Cita, ESTADOS_CITA, EvaluacionFinal, HistoriaClinica, Paciente, Personal, Sesion, TIPOS_ATENCION, Usuario, sequelize } = require('../models');
+const { Cita, ESTADOS_CITA, ESTADOS_CONFIRMACION, EvaluacionFinal, HistoriaClinica, Paciente, Personal, Sesion, TIPOS_ATENCION, Usuario, sequelize } = require('../models');
 const { boliviaDate } = require('../utils/boliviaDateTime');
 
 const includeCita = [
@@ -33,7 +33,17 @@ const normalizarCita = (body) => ({
   motivo: body.motivo,
   tipo_atencion: body.tipo_atencion || 'Sesion de fisioterapia',
   estado: body.estado || 'Pendiente',
-  observacion: body.observacion
+  observacion: body.observacion,
+  profesional_id: body.profesional_id || null,
+  historia_clinica_id: body.historia_clinica_id || null,
+  sesion_id: body.sesion_id || null,
+  numero_sesion: body.numero_sesion || null,
+  total_sesiones: body.total_sesiones || null,
+  canal_origen: body.canal_origen || null,
+  referencia_origen: body.referencia_origen || null,
+  estado_confirmacion: body.estado_confirmacion || null,
+  paciente_verificado: body.paciente_verificado === true,
+  metodo_verificacion: body.metodo_verificacion || null
 });
 
 const validarCita = (body) => {
@@ -43,6 +53,7 @@ const validarCita = (body) => {
   if (body.hora_fin && body.hora_fin <= body.hora_inicio) return 'hora_fin debe ser mayor que hora_inicio';
   if (!ESTADOS_CITA.includes(body.estado || 'Pendiente')) return 'estado no es valido';
   if (body.tipo_atencion && !TIPOS_ATENCION.includes(body.tipo_atencion)) return 'tipo_atencion no es valido';
+  if (body.estado_confirmacion && !ESTADOS_CONFIRMACION.includes(body.estado_confirmacion)) return 'estado_confirmacion no es valido';
   return null;
 };
 
@@ -169,7 +180,8 @@ const crearProgramacion = async (req, res, next) => {
         fecha: item.fecha, hora_inicio: normalizarHora(item.hora_inicio), hora_fin: normalizarHora(item.hora_fin),
         fecha_programada_original: item.fecha, hora_inicio_original: normalizarHora(item.hora_inicio), hora_fin_original: normalizarHora(item.hora_fin),
         tipo_atencion: 'Sesion de tratamiento', motivo: `Sesion ${item.numero_sesion} de ${indicadas}`,
-        estado: 'Programada', origen: 'Plan de tratamiento', observacion: item.observacion
+        estado: 'Programada', origen: 'Plan de tratamiento', canal_origen: 'SISTEMA_INTERNO',
+        estado_confirmacion: 'PENDIENTE', observacion: item.observacion
       }, { transaction });
     }
     await transaction.commit();
@@ -189,6 +201,9 @@ const buildFiltros = (query = {}) => {
   if (query.fecha) where.fecha = query.fecha;
   if (query.estado) where.estado = query.estado;
   if (query.tipo_atencion) where.tipo_atencion = query.tipo_atencion;
+  if (query.canal_origen) where.canal_origen = query.canal_origen;
+  if (query.estado_confirmacion) where.estado_confirmacion = query.estado_confirmacion;
+  if (query.profesional_id) where.profesional_id = query.profesional_id;
   if (query.fecha_inicio || query.fecha_fin) {
     where.fecha = {};
     if (query.fecha_inicio) where.fecha[Op.gte] = query.fecha_inicio;
@@ -232,7 +247,13 @@ const crearCita = async (req, res, next) => {
     const errorSolapamiento = await validarSolapamiento(payload);
     if (errorSolapamiento) return res.status(409).json({ message: errorSolapamiento });
 
-    const cita = await Cita.create({ ...payload, usuario_id: req.usuario.id });
+    const cita = await Cita.create({
+      ...payload,
+      usuario_id: req.usuario.id,
+      profesional_id: payload.profesional_id || req.usuario.id,
+      canal_origen: 'SISTEMA_INTERNO',
+      estado_confirmacion: payload.estado_confirmacion || 'PENDIENTE'
+    });
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     return res.status(201).json(citaCompleta);
   } catch (error) {
