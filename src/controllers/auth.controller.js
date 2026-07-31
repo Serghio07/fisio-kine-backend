@@ -92,7 +92,7 @@ const login = async (req, res, next) => {
     });
     const usuarioSeguro = usuarioDb.toJSON();
     delete usuarioSeguro.password;
-    return res.json({ message: 'Inicio de sesión exitoso.', usuario: usuarioSeguro });
+    return res.json({ message: 'Inicio de sesión exitoso.', token, usuario: usuarioSeguro });
   } catch (error) {
     return next(error);
   }

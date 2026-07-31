@@ -5,7 +5,8 @@ const {
   pacientesRecientes,
   proximasCitas,
   resumenDashboard,
-  sesionesHoy
+  sesionesHoy,
+  notificaciones
 } = require('../controllers/dashboard.controller');
 
 router.use(autenticar, filtrarRespuestaFinanciera);
@@ -14,5 +15,6 @@ router.get('/resumen', resumenDashboard);
 router.get('/proximas-citas', proximasCitas);
 router.get('/sesiones-hoy', sesionesHoy);
 router.get('/pacientes-recientes', pacientesRecientes);
+router.get('/notificaciones', notificaciones);
 
 module.exports = router;

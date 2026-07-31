@@ -25,12 +25,14 @@ const registrarActividad = require('./middlewares/actividad.middleware');
 const blogRoutes = require('./routes/blog.routes');
 const blogCategoryRoutes = require('./routes/blogCategory.routes');
 const publicBlogRoutes = require('./routes/publicBlog.routes');
-const whatsappRoutes = require('./routes/whatsapp.routes');
 const path = require('path');
 
 const app = express();
 
-const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3001')
+const allowedOrigins = (
+  process.env.CORS_ORIGINS
+  || 'http://localhost:5173,http://localhost:3001,http://localhost:8081,http://localhost:8082'
+)
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -43,8 +45,6 @@ app.use(cors({
   },
   credentials: true
 }));
-// Debe montarse antes de express.json para conservar el cuerpo exacto que firma Meta.
-app.use('/api/whatsapp', whatsappRoutes);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(morgan('dev'));

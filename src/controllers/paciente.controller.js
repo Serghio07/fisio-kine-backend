@@ -1,5 +1,14 @@
 const { Op } = require('sequelize');
-const { Paciente } = require('../models');
+const {
+  Cita,
+  ConceptoCobro,
+  EvaluacionFinal,
+  HistoriaClinica,
+  MovimientoPago,
+  Paciente,
+  Sesion,
+  Usuario
+} = require('../models');
 const { validarImagen } = require('../utils/imagen');
 const { boliviaDate } = require('../utils/boliviaDateTime');
 
@@ -93,8 +102,114 @@ const validarCiUnico = async (ci, id = null) => {
 
 const listarPacientes = async (req, res, next) => {
   try {
+    const usesMobileQuery = ['search', 'estado', 'page', 'limit'].some(
+      (key) => Object.prototype.hasOwnProperty.call(req.query, key)
+    );
+    if (usesMobileQuery) {
+      const search = String(req.query.search || '').trim().replace(/\s+/g, ' ');
+      const estado = String(req.query.estado || 'active').toLowerCase();
+      const sexo = String(req.query.sexo || '').trim().toLocaleUpperCase('es-BO');
+      const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, Math.max(10, Number.parseInt(req.query.limit, 10) || 25));
+      const where = {};
+
+      if (estado === 'active') where.estado = true;
+      if (estado === 'inactive') where.estado = false;
+      if (['MASCULINO', 'FEMENINO'].includes(sexo)) where.sexo = sexo;
+      if (search) {
+        where[Op.or] = [
+          { nombres: { [Op.iLike]: `%${search}%` } },
+          { apellidos: { [Op.iLike]: `%${search}%` } },
+          { ci: { [Op.iLike]: `%${search}%` } },
+          Paciente.sequelize.where(
+            Paciente.sequelize.fn(
+              'concat',
+              Paciente.sequelize.col('nombres'),
+              ' ',
+              Paciente.sequelize.col('apellidos')
+            ),
+            { [Op.iLike]: `%${search}%` }
+          )
+        ];
+      }
+
+      const [{ rows, count }, activos, inactivos] = await Promise.all([
+        Paciente.findAndCountAll({
+          where,
+          attributes: ['id', 'nombres', 'apellidos', 'ci', 'telefono', 'foto', 'edad', 'sexo', 'estado'],
+          order: [['id', 'DESC']],
+          limit,
+          offset: (page - 1) * limit
+        }),
+        Paciente.count({ where: { estado: true } }),
+        Paciente.count({ where: { estado: false } })
+      ]);
+      return res.json({
+        items: rows,
+        total: count,
+        summary: { total: activos + inactivos, active: activos, inactive: inactivos },
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit)
+      });
+    }
+
     const pacientes = await Paciente.findAll({ order: [['id', 'DESC']], limit: 500 });
     return res.json(pacientes);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const validarDuplicados = async (req, res, next) => {
+  try {
+    const ci = textoLimpio(req.query.ci);
+    const excludeId = Number.parseInt(req.query.excludeId, 10) || null;
+    if (!ci) return res.status(400).json({ message: 'El CI es obligatorio.' });
+
+    const excludeWhere = excludeId ? { id: { [Op.ne]: excludeId } } : {};
+    const exacto = await Paciente.findOne({
+      where: { ...excludeWhere, ci },
+      attributes: ['id', 'nombres', 'apellidos', 'ci', 'telefono', 'estado']
+    });
+
+    const posibles = [];
+    const nombres = textoLimpio(req.query.nombres);
+    const apellidos = textoLimpio(req.query.apellidos);
+    const telefono = textoLimpio(req.query.telefono);
+    const fechaNacimiento = textoLimpio(req.query.fecha_nacimiento);
+    const condiciones = [];
+    if (telefono) condiciones.push({ telefono });
+    if (nombres && apellidos) {
+      condiciones.push({
+        [Op.and]: [
+          { nombres: { [Op.iLike]: nombres } },
+          { apellidos: { [Op.iLike]: apellidos } }
+        ]
+      });
+    }
+    if (fechaNacimiento && nombres) {
+      condiciones.push({
+        [Op.and]: [
+          { fecha_nacimiento: fechaNacimiento },
+          { nombres: { [Op.iLike]: nombres } }
+        ]
+      });
+    }
+    if (condiciones.length) {
+      posibles.push(...await Paciente.findAll({
+        where: {
+          ...excludeWhere,
+          ...(exacto ? { id: { [Op.notIn]: [exacto.id, ...(excludeId ? [excludeId] : [])] } } : {}),
+          [Op.or]: condiciones
+        },
+        attributes: ['id', 'nombres', 'apellidos', 'ci', 'telefono', 'estado'],
+        order: [['id', 'DESC']],
+        limit: 5
+      }));
+    }
+
+    return res.json({ exacto, similares: posibles });
   } catch (error) {
     return next(error);
   }
@@ -105,6 +220,95 @@ const obtenerPaciente = async (req, res, next) => {
     const paciente = await Paciente.findByPk(req.params.id);
     if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado.' });
     return res.json(paciente);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const obtenerSeccionPaciente = async (req, res, next) => {
+  try {
+    const pacienteId = Number.parseInt(req.params.id, 10);
+    const seccion = String(req.params.seccion || '').toLowerCase();
+    if (!Number.isInteger(pacienteId) || pacienteId <= 0) {
+      return res.status(400).json({ message: 'Paciente no válido.' });
+    }
+    if (!await Paciente.findByPk(pacienteId, { attributes: ['id'] })) {
+      return res.status(404).json({ message: 'Paciente no encontrado.' });
+    }
+
+    if (seccion === 'historias') {
+      const items = await HistoriaClinica.findAll({
+        where: { paciente_id: pacienteId },
+        include: [
+          { model: EvaluacionFinal, as: 'evaluacion_final', attributes: ['sesiones_contratadas'] },
+          { model: Usuario, as: 'usuario', attributes: ['id', 'nombre'] }
+        ],
+        order: [['anulada', 'ASC'], ['fecha_evaluacion', 'DESC'], ['id', 'DESC']]
+      });
+      return res.json({ items });
+    }
+
+    if (seccion === 'sesiones') {
+      const items = await Sesion.findAll({
+        where: { paciente_id: pacienteId },
+        include: [
+          { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'estado', 'anulada'] },
+          { model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre'] }
+        ],
+        order: [['fecha', 'DESC'], ['numero_sesion', 'DESC'], ['id', 'DESC']]
+      });
+      return res.json({ items });
+    }
+
+    if (seccion === 'citas') {
+      const items = await Cita.findAll({
+        where: { paciente_id: pacienteId },
+        include: [
+          { model: Usuario, as: 'profesional', attributes: ['id', 'nombre'] },
+          { model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre'] }
+        ],
+        order: [['fecha', 'DESC'], ['hora_inicio', 'DESC'], ['id', 'DESC']]
+      });
+      return res.json({ items });
+    }
+
+    if (seccion === 'pagos') {
+      if (req.usuario?.rol !== 'admin') {
+        return res.status(403).json({ message: 'La información financiera es exclusiva del Administrador.' });
+      }
+      const conceptos = await ConceptoCobro.findAll({
+        where: { paciente_id: pacienteId },
+        include: [{
+          model: MovimientoPago,
+          as: 'movimientos',
+          required: false,
+          include: [{ model: Usuario, as: 'recibido_por', attributes: ['id', 'nombre'] }]
+        }],
+        order: [['fecha_origen', 'DESC'], ['id', 'DESC']]
+      });
+      const items = conceptos.map((model) => {
+        const item = model.toJSON();
+        const movimientos = (item.movimientos || []).filter((movimiento) => movimiento.estado === 'Activo');
+        const totalPagado = movimientos.reduce((total, movimiento) => total + Number(movimiento.monto || 0), 0);
+        return {
+          ...item,
+          movimientos,
+          total_pagado: Number(totalPagado.toFixed(2)),
+          saldo_pendiente: Number(Math.max(Number(item.monto_esperado || 0) - totalPagado, 0).toFixed(2))
+        };
+      });
+      return res.json({
+        items,
+        resumen: {
+          total_esperado: items.reduce((total, item) => total + Number(item.monto_esperado || 0), 0),
+          total_pagado: items.reduce((total, item) => total + item.total_pagado, 0),
+          saldo_pendiente: items.reduce((total, item) => total + item.saldo_pendiente, 0),
+          conceptos_pendientes: items.filter((item) => item.saldo_pendiente > 0 && item.activo).length
+        }
+      });
+    }
+
+    return res.status(400).json({ message: 'Sección de paciente no válida.' });
   } catch (error) {
     return next(error);
   }
@@ -157,10 +361,25 @@ const eliminarPaciente = async (req, res, next) => {
   }
 };
 
+const reactivarPaciente = async (req, res, next) => {
+  try {
+    const paciente = await Paciente.findByPk(req.params.id);
+    if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado.' });
+    if (paciente.estado) return res.json({ message: 'El paciente ya estaba activo.', paciente });
+    await paciente.update({ estado: true });
+    return res.json({ message: 'Paciente reactivado correctamente.', paciente });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   listarPacientes,
+  validarDuplicados,
   obtenerPaciente,
+  obtenerSeccionPaciente,
   crearPaciente,
   actualizarPaciente,
-  eliminarPaciente
+  eliminarPaciente,
+  reactivarPaciente
 };

@@ -5,7 +5,6 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "start:whatsapp-test": "node src/server.js --env=.env.whatsapp-test",
     "dev": "nodemon src/server.js",
     "seed:admin": "node src/seeders/admin.js",
     "seed:demo": "node src/seeders/demo.js",
@@ -30,13 +29,7 @@
     "migrate:timezone-bolivia": "node src/scripts/configurarZonaHorariaBolivia.js",
     "migrate:programacion-sesiones": "node src/scripts/migrateProgramacionSesiones.js",
     "migrate:blog": "node src/scripts/migrateBlog.js",
-    "migrate:whatsapp-appointments": "node src/scripts/migrateWhatsappAppointments.js --env=.env.whatsapp-test",
-    "migrate:whatsapp-appointments:production": "node src/scripts/migrateWhatsappAppointmentsProduction.js --confirm-production",
-    "verify:whatsapp-test": "node src/scripts/verifyWhatsappTestDatabase.js --env=.env.whatsapp-test",
-    "verify:whatsapp-persistence": "node src/scripts/verifyWhatsappPersistence.js --env=.env.whatsapp-test",
-    "verify:whatsapp-simulator": "node src/scripts/verifyWhatsappSimulator.js --env=.env.whatsapp-test",
-    "start:whatsapp-gateway": "node src/scripts/whatsappWebhookGateway.js",
-    "test:whatsapp": "node --test tests/whatsapp/*.test.js",
+    "remove:whatsapp": "node src/scripts/removeWhatsappIntegration.js --confirm",
     "seed:blog": "node src/seeders/blog.js"
   },
   "dependencies": {

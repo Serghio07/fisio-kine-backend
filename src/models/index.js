@@ -13,7 +13,7 @@ const InformeMedico = require('./InformeMedico');
 const RegistroSemanal = require('./RegistroSemanal');
 const PlanillaAtencion = require('./PlanillaAtencion');
 const PlanillaSesion = require('./PlanillaSesion');
-const { Cita, ESTADOS_CITA, TIPOS_ATENCION, CANALES_ORIGEN, ESTADOS_CONFIRMACION } = require('./Cita');
+const { Cita, ESTADOS_CITA, TIPOS_ATENCION } = require('./Cita');
 const Personal = require('./Personal');
 const PlanillaPersonal = require('./PlanillaPersonal');
 const PlanillaPersonalDetalle = require('./PlanillaPersonalDetalle');
@@ -30,9 +30,6 @@ const BlogCategory = require('./BlogCategory');
 const BlogPost = require('./BlogPost');
 const BlogTag = require('./BlogTag');
 const BlogPostTag = require('./BlogPostTag');
-const ConversacionWhatsapp = require('./ConversacionWhatsapp');
-const MensajeWhatsapp = require('./MensajeWhatsapp');
-const AuditoriaWhatsapp = require('./AuditoriaWhatsapp');
 
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -176,21 +173,6 @@ BlogPost.belongsTo(Usuario, { foreignKey: 'publicadoPorId', as: 'publicado_por' 
 BlogPost.belongsToMany(BlogTag, { through: BlogPostTag, foreignKey: 'blog_post_id', otherKey: 'blog_tag_id', as: 'etiquetas' });
 BlogTag.belongsToMany(BlogPost, { through: BlogPostTag, foreignKey: 'blog_tag_id', otherKey: 'blog_post_id', as: 'articulos' });
 
-Paciente.hasMany(ConversacionWhatsapp, { foreignKey: 'paciente_id', as: 'conversaciones_whatsapp', onDelete: 'SET NULL' });
-ConversacionWhatsapp.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
-ConversacionWhatsapp.hasMany(MensajeWhatsapp, { foreignKey: 'conversacion_id', as: 'mensajes', onDelete: 'RESTRICT' });
-MensajeWhatsapp.belongsTo(ConversacionWhatsapp, { foreignKey: 'conversacion_id', as: 'conversacion' });
-Paciente.hasMany(MensajeWhatsapp, { foreignKey: 'paciente_id', as: 'mensajes_whatsapp', onDelete: 'SET NULL' });
-MensajeWhatsapp.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
-Cita.hasMany(MensajeWhatsapp, { foreignKey: 'cita_id', as: 'mensajes_whatsapp', onDelete: 'SET NULL' });
-MensajeWhatsapp.belongsTo(Cita, { foreignKey: 'cita_id', as: 'cita' });
-ConversacionWhatsapp.hasMany(AuditoriaWhatsapp, { foreignKey: 'conversacion_id', as: 'auditoria', onDelete: 'SET NULL' });
-AuditoriaWhatsapp.belongsTo(ConversacionWhatsapp, { foreignKey: 'conversacion_id', as: 'conversacion' });
-Paciente.hasMany(AuditoriaWhatsapp, { foreignKey: 'paciente_id', as: 'auditoria_whatsapp', onDelete: 'SET NULL' });
-AuditoriaWhatsapp.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
-Cita.hasMany(AuditoriaWhatsapp, { foreignKey: 'cita_id', as: 'auditoria_whatsapp', onDelete: 'SET NULL' });
-AuditoriaWhatsapp.belongsTo(Cita, { foreignKey: 'cita_id', as: 'cita' });
-
 module.exports = {
   sequelize,
   Usuario,
@@ -210,8 +192,6 @@ module.exports = {
   Cita,
   ESTADOS_CITA,
   TIPOS_ATENCION,
-  CANALES_ORIGEN,
-  ESTADOS_CONFIRMACION,
   Personal,
   PlanillaPersonal,
   PlanillaPersonalDetalle,
@@ -227,8 +207,5 @@ module.exports = {
   BlogCategory,
   BlogPost,
   BlogTag,
-  BlogPostTag,
-  ConversacionWhatsapp,
-  MensajeWhatsapp,
-  AuditoriaWhatsapp
+  BlogPostTag
 };

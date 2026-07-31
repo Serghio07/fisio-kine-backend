@@ -3,17 +3,19 @@ const { Cita, HistoriaClinica, InformeMedico, Paciente, Sesion } = require('../m
 const { boliviaDate } = require('../utils/boliviaDateTime');
 
 const includePaciente = [{ model: Paciente, as: 'paciente' }];
+const ESTADOS_CITA_PENDIENTE = ['Pendiente', 'Programada', 'Confirmada', 'Reprogramada'];
 
 const resumenDashboard = async (req, res, next) => {
   try {
     const hoy = boliviaDate();
-    const [totalPacientes, citasHoy, sesionesHoy, atendidosHoy, citasPendientes, informesGenerados] = await Promise.all([
-      Paciente.count(),
-      Cita.count({ where: { fecha: hoy } }),
+    const [totalPacientes, citasHoy, sesionesHoy, atendidosHoy, citasPendientes, sesionesPendientes, informesGenerados] = await Promise.all([
+      Paciente.count({ where: { estado: true } }),
+      Cita.count({ where: { fecha: hoy, estado: { [Op.ne]: 'Cancelada' } } }),
       Sesion.count({ where: { fecha: hoy, anulada: false } }),
-      Sesion.count({ where: { fecha: hoy, asistencia: 'asistio', anulada: false } }),
-      Cita.count({ where: { estado: { [Op.in]: ['Pendiente', 'Confirmada'] } } }),
-      InformeMedico.count()
+      Cita.count({ distinct: true, col: 'paciente_id', where: { fecha: hoy, estado: 'Atendida' } }),
+      Cita.count({ where: { fecha: hoy, estado: { [Op.in]: ESTADOS_CITA_PENDIENTE } } }),
+      Cita.count({ where: { fecha: hoy, origen: 'Plan de tratamiento', estado: { [Op.in]: ESTADOS_CITA_PENDIENTE } } }),
+      InformeMedico.count({ where: { fecha: hoy } })
     ]);
 
     return res.json({
@@ -22,6 +24,7 @@ const resumenDashboard = async (req, res, next) => {
       sesionesHoy,
       atendidosHoy,
       citasPendientes,
+      sesionesPendientes,
       informesGenerados
     });
   } catch (error) {
@@ -34,7 +37,7 @@ const proximasCitas = async (req, res, next) => {
     const citas = await Cita.findAll({
       where: {
         fecha: { [Op.gte]: boliviaDate() },
-        estado: { [Op.ne]: 'Cancelada' }
+        estado: { [Op.in]: ESTADOS_CITA_PENDIENTE }
       },
       include: includePaciente,
       order: [['fecha', 'ASC'], ['hora_inicio', 'ASC']],
@@ -73,9 +76,44 @@ const pacientesRecientes = async (req, res, next) => {
   }
 };
 
+const notificaciones = async (req, res, next) => {
+  try {
+    const hoy = boliviaDate();
+    const citas = await Cita.findAll({
+      where: {
+        fecha: { [Op.gte]: hoy },
+        estado: { [Op.in]: ESTADOS_CITA_PENDIENTE }
+      },
+      include: includePaciente,
+      order: [['fecha', 'ASC'], ['hora_inicio', 'ASC']],
+      limit: 30
+    });
+    return res.json(citas.map((cita) => {
+      const item = cita.toJSON();
+      const esSesion = item.origen === 'Plan de tratamiento' || Boolean(item.numero_sesion);
+      return {
+        id: `${esSesion ? 'sesion' : 'cita'}-${item.id}`,
+        cita_id: item.id,
+        tipo: esSesion ? 'sesion' : 'cita',
+        titulo: esSesion ? `Sesión ${item.numero_sesion || ''} programada`.trim() : 'Cita programada',
+        mensaje: `${item.paciente?.nombres || 'Paciente'} ${item.paciente?.apellidos || ''}`.trim(),
+        fecha: item.fecha,
+        hora: String(item.hora_inicio || '').slice(0, 5),
+        estado: item.estado,
+        paciente_id: item.paciente_id,
+        historia_clinica_id: item.historia_clinica_id || null,
+        es_hoy: item.fecha === hoy
+      };
+    }));
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   resumenDashboard,
   proximasCitas,
   sesionesHoy,
-  pacientesRecientes
+  pacientesRecientes,
+  notificaciones
 };

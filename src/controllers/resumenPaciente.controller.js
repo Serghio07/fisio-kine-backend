@@ -66,7 +66,7 @@ const resumenPaciente = async (req, res, next) => {
         include: [{ model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre', 'usuario', 'foto'] }],
         order: [['fecha', 'DESC'], ['hora_inicio', 'DESC']]
       }),
-      req.usuario.rol === 'admin' ? ConceptoCobro.findAll({
+      req.usuario.rol === 'admin' && req.query.scope !== 'clinical' ? ConceptoCobro.findAll({
         where: { paciente_id: pacienteId },
         include: [
           { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'motivo_consulta', 'estado'] },
@@ -103,8 +103,55 @@ const resumenPaciente = async (req, res, next) => {
       req,
       pacienteId,
       'Consultó',
-      `Consultó el resumen ${req.usuario.rol === 'admin' ? 'clínico y económico' : 'clínico'} del paciente ${paciente.nombres} ${paciente.apellidos || ''}`.trim()
+      `Consultó el resumen ${
+        req.usuario.rol === 'admin' && req.query.scope !== 'clinical'
+          ? 'clínico y económico'
+          : 'clínico'
+      } del paciente ${paciente.nombres} ${paciente.apellidos || ''}`.trim()
     );
+    if (req.query.scope === 'clinical') {
+      return res.json({
+        paciente,
+        historias: historias.map((model) => {
+          const item = model.toJSON();
+          return {
+            id: item.id,
+            fecha_evaluacion: item.fecha_evaluacion,
+            diagnostico_medico: item.diagnostico_medico,
+            motivo_consulta: item.motivo_consulta,
+            profesional_cargo: item.profesional_cargo,
+            estado: item.estado,
+            anulada: item.anulada,
+            usuario: item.usuario
+              ? { id: item.usuario.id, nombre: item.usuario.nombre }
+              : null
+          };
+        }),
+        sesiones: sesionesReales.map((item) => ({
+          id: item.id,
+          fecha: item.fecha,
+          numero_sesion: item.numero_sesion,
+          sesiones_debe: item.sesiones_debe,
+          sesiones_hizo: item.sesiones_hizo,
+          asistencia: item.asistencia,
+          dolor_antes: item.dolor_antes,
+          dolor_despues: item.dolor_despues,
+          evolucion_observada: item.evolucion_observada,
+          observacion: item.observacion
+        })),
+        citas: citas.map((model) => {
+          const item = model.toJSON();
+          return {
+            id: item.id,
+            fecha: item.fecha,
+            hora_inicio: item.hora_inicio,
+            estado: item.estado,
+            tipo_atencion: item.tipo_atencion
+          };
+        }),
+        consultado_en: new Date().toISOString()
+      });
+    }
     return res.json({
       paciente,
       historias,
