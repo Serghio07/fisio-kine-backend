@@ -29,22 +29,27 @@ const path = require('path');
 
 const app = express();
 
-const allowedOrigins = (
-  process.env.CORS_ORIGINS
-  || 'http://localhost:5173,http://localhost:3001,http://localhost:8081,http://localhost:8082'
-)
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_LOCAL_IP_URL,
+  process.env.NGROK_FRONTEND_URL
+].filter(Boolean);
 
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({
+const corsOptions = {
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+
+    console.error('Origen bloqueado por CORS:', origin);
     return callback(new Error('Origen no permitido por CORS'));
   },
-  credentials: true
-}));
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(morgan('dev'));
