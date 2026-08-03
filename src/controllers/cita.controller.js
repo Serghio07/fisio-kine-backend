@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { Cita, ESTADOS_CITA, EvaluacionFinal, HistoriaClinica, Paciente, Personal, Sesion, TIPOS_ATENCION, Usuario, sequelize } = require('../models');
 const { boliviaDate } = require('../utils/boliviaDateTime');
+const { actualizarCitasNoAsistidas } = require('../services/citaEstado.service');
 
 const includeCita = [
   { model: Paciente, as: 'paciente' },
@@ -86,6 +87,7 @@ const validarSolapamiento = async (payload, citaId = null) => {
 };
 
 const resumenProgramacion = async (historiaId, transaction) => {
+  await actualizarCitasNoAsistidas(transaction);
   const historia = await HistoriaClinica.findByPk(historiaId, {
     include: [{ model: EvaluacionFinal, as: 'evaluacion_final' }],
     transaction
@@ -205,6 +207,7 @@ const buildFiltros = (query = {}) => {
 
 const listarCitas = async (req, res, next) => {
   try {
+    await actualizarCitasNoAsistidas();
     const citas = await Cita.findAll({
       where: buildFiltros(req.query),
       include: includeCita,
@@ -218,6 +221,7 @@ const listarCitas = async (req, res, next) => {
 
 const obtenerCita = async (req, res, next) => {
   try {
+    await actualizarCitasNoAsistidas();
     const cita = await Cita.findByPk(req.params.id, { include: includeCita });
     if (!cita) return res.status(404).json({ message: 'Cita no encontrada' });
     return res.json(cita);
@@ -301,6 +305,7 @@ const cambiarEstadoCita = async (req, res, next) => {
 
 const listarCitasPaciente = async (req, res, next) => {
   try {
+    await actualizarCitasNoAsistidas();
     const paciente = await Paciente.findByPk(req.params.id);
     if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado' });
 
@@ -317,6 +322,7 @@ const listarCitasPaciente = async (req, res, next) => {
 
 const listarCalendario = async (req, res, next) => {
   try {
+    await actualizarCitasNoAsistidas();
     const citas = await Cita.findAll({
       where: buildFiltros(req.query),
       include: includeCita,
@@ -330,6 +336,7 @@ const listarCalendario = async (req, res, next) => {
 
 const listarPeriodo = (tipo) => async (req, res, next) => {
   try {
+    await actualizarCitasNoAsistidas();
     const hoy = new Date(`${boliviaDate()}T12:00:00-04:00`);
     const inicio = new Date(hoy);
     const fin = new Date(hoy);
