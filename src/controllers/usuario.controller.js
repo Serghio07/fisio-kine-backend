@@ -5,6 +5,10 @@ const { validarPasswordSegura } = require('../utils/password');
 
 const atributosPublicos = { exclude: ['password'] };
 const limpiarTexto = (value) => (typeof value === 'string' ? value.trim() : value);
+const textoMayusculas = (value) => {
+  const cleaned = limpiarTexto(value);
+  return typeof cleaned === 'string' ? cleaned.toLocaleUpperCase('es-BO') : cleaned;
+};
 const normalizarEstado = (estado = 'activo') => {
   if (estado === true) return 'activo';
   if (estado === false) return 'inactivo';
@@ -18,22 +22,22 @@ const camposLaborales = [
   'fecha_ingreso', 'observaciones'
 ];
 const datosLaborales = (body, estadoUsuario = 'activo') => ({
-  apellido_paterno: limpiarTexto(body.apellido_paterno),
-  apellido_materno: limpiarTexto(body.apellido_materno) || null,
-  nombres: limpiarTexto(body.nombres),
-  ci: limpiarTexto(body.ci),
+  apellido_paterno: textoMayusculas(body.apellido_paterno),
+  apellido_materno: textoMayusculas(body.apellido_materno) || null,
+  nombres: textoMayusculas(body.nombres),
+  ci: textoMayusculas(body.ci),
   titulo_profesional: limpiarTexto(body.titulo_profesional) || null,
-  cargo: limpiarTexto(body.cargo),
+  cargo: textoMayusculas(body.cargo),
   dias_trabajo: Array.isArray(body.dias_trabajo) ? body.dias_trabajo : [],
   hora_entrada: body.hora_entrada || null,
   hora_salida: body.hora_salida || null,
   sueldo_base: body.tipo_pago === 'por_servicio' ? null : body.sueldo_base,
   tipo_pago: body.tipo_pago || 'mensual',
   telefono: limpiarTexto(body.telefono) || null,
-  direccion: limpiarTexto(body.direccion) || null,
+  direccion: textoMayusculas(body.direccion) || null,
   fecha_ingreso: body.fecha_ingreso,
   estado: estadoUsuario === 'activo' ? 'activo' : 'inactivo',
-  observaciones: limpiarTexto(body.observaciones) || null
+  observaciones: textoMayusculas(body.observaciones) || null
 });
 const validarDatosLaborales = (data) => {
   if (!data.apellido_paterno || !data.nombres || !data.ci || !data.cargo || !data.fecha_ingreso) {
@@ -42,7 +46,7 @@ const validarDatosLaborales = (data) => {
   if (!data.dias_trabajo.length || !data.hora_entrada || !data.hora_salida) {
     return 'Selecciona los dias de trabajo y registra la hora de entrada y salida.';
   }
-  if (data.titulo_profesional && !['Doc.', 'Dr.', 'Dra.', 'Lic.', 'Sr.', 'Sra.'].includes(data.titulo_profesional)) {
+  if (data.titulo_profesional && !['Doc.', 'Dr.', 'Dra.', 'Lic.', 'Tec. Sup.', 'Sr.', 'Sra.'].includes(data.titulo_profesional)) {
     return 'Titulo profesional no valido.';
   }
   if (data.hora_salida <= data.hora_entrada) return 'La hora de salida debe ser posterior a la hora de entrada.';
@@ -65,7 +69,12 @@ const listarUsuarios = async (req, res, next) => {
     }
 
     const usuarios = await Usuario.findAll({ where, attributes: atributosPublicos, include: includeFichaPersonal, order: [['id', 'ASC']] });
-    return res.json(usuarios);
+    const usuariosVisibles = usuarios.filter((usuario) => !(
+      usuario.rol === 'personal'
+      && usuario.estado === 'inactivo'
+      && !usuario.ficha_personal
+    ));
+    return res.json(usuariosVisibles);
   } catch (error) {
     return next(error);
   }

@@ -13,7 +13,7 @@ const Personal = sequelize.define(
     titulo_profesional: {
       type: DataTypes.STRING(10),
       allowNull: true,
-      validate: { isIn: [['Doc.', 'Dr.', 'Dra.', 'Lic.', 'Sr.', 'Sra.']] }
+      validate: { isIn: [['Doc.', 'Dr.', 'Dra.', 'Lic.', 'Tec. Sup.', 'Sr.', 'Sra.']] }
     },
     cargo: { type: DataTypes.STRING(120), allowNull: false },
     nombre_mostrado: {

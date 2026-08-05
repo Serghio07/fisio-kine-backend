@@ -18,7 +18,7 @@ const migrate = async () => {
         ADD CONSTRAINT personal_titulo_profesional_check
         CHECK (
           titulo_profesional IS NULL
-          OR titulo_profesional IN ('Doc.', 'Dr.', 'Dra.', 'Lic.', 'Sr.', 'Sra.')
+          OR titulo_profesional IN ('Doc.', 'Dr.', 'Dra.', 'Lic.', 'Tec. Sup.', 'Sr.', 'Sra.')
         )
     `);
     console.log('Titulo profesional habilitado para el personal.');
