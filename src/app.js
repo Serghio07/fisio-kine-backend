@@ -25,42 +25,54 @@ const registrarActividad = require('./middlewares/actividad.middleware');
 const blogRoutes = require('./routes/blog.routes');
 const blogCategoryRoutes = require('./routes/blogCategory.routes');
 const publicBlogRoutes = require('./routes/publicBlog.routes');
+const whatsappRoutes = require('./routes/whatsapp.routes');
+const whatsappReceptionReferralRoutes = require('./routes/whatsappReceptionReferral.routes');
+const internalNotificationRoutes = require('./routes/internalNotification.routes');
+const whatsappMonitoringRoutes=require('./routes/whatsappMonitoring.routes');
+const { captureWhatsappRawBody } = require('./config/whatsapp');
 const path = require('path');
+const sequelize = require('./config/database');
+const whatsappConfig = require('./config/whatsapp');
+const { getAllowedOrigins } = require('./config/cors');
 
 const app = express();
 
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  process.env.FRONTEND_LOCAL_IP_URL,
-  process.env.NGROK_FRONTEND_URL
-].filter(Boolean);
+const allowedOrigins = getAllowedOrigins();
 
 const corsOptions = {
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
 
-    console.error('Origen bloqueado por CORS:', origin);
+    console.error('Solicitud bloqueada por la política CORS');
     return callback(new Error('Origen no permitido por CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning']
 };
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '2mb', verify: captureWhatsappRawBody }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
-app.use(morgan('dev'));
+app.use('/api/whatsapp', whatsappRoutes);
+if (process.env.NODE_ENV !== 'production') app.use(morgan('dev'));
 app.use(registrarActividad);
 app.use('/uploads', express.static(path.resolve(__dirname, '../uploads'), { maxAge: '1d', fallthrough: false }));
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', service: 'Physio Active API' });
+app.get('/api/health', async (req, res) => {
+  let database = 'unavailable';
+  try { await sequelize.authenticate(); database = 'available'; } catch {}
+  const whatsapp = whatsappConfig.getWhatsappConfig();
+  const payload = { status: database === 'available' ? 'ok' : 'degraded', service: 'Physio Active API', version: require('../package.json').version, environment: process.env.NODE_ENV || 'development', database, db_sync: false, whatsapp_enabled: whatsapp.enabled, jobs: { appointment_reminders: whatsappConfig.getWhatsappRemindersEnabled(), referral_alerts: whatsappConfig.getWhatsappReferralPendingAlertEnabled() } };
+  res.status(database === 'available' ? 200 : 503).json(payload);
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/whatsapp/derivaciones', whatsappReceptionReferralRoutes);
+app.use('/api/notificaciones', internalNotificationRoutes);
+app.use('/api/whatsapp/monitoring',whatsappMonitoringRoutes);
 app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/pacientes', pacienteRoutes);
 app.use('/api/historias-clinicas', historiaClinicaRoutes);
@@ -87,6 +99,8 @@ app.use((req, res) => {
 });
 
 app.use((error, req, res, next) => {
+  if (error.type === 'entity.parse.failed') return res.status(400).json({ message: 'JSON invalido' });
+  if (error.type === 'entity.too.large') return res.status(413).json({ message: 'Cuerpo de solicitud demasiado grande' });
   if (error.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ message: 'La imagen no puede superar 5 MB.' });
   if (error.status) return res.status(error.status).json({ message: error.message, errors: error.errors });
   if (error.name === 'SequelizeValidationError' || error.name === 'SequelizeUniqueConstraintError') {

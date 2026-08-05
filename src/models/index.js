@@ -13,7 +13,7 @@ const InformeMedico = require('./InformeMedico');
 const RegistroSemanal = require('./RegistroSemanal');
 const PlanillaAtencion = require('./PlanillaAtencion');
 const PlanillaSesion = require('./PlanillaSesion');
-const { Cita, ESTADOS_CITA, TIPOS_ATENCION } = require('./Cita');
+const { Cita, ESTADOS_CITA, TIPOS_ATENCION, BLOCKING_APPOINTMENT_STATUSES } = require('./Cita');
 const Personal = require('./Personal');
 const PlanillaPersonal = require('./PlanillaPersonal');
 const PlanillaPersonalDetalle = require('./PlanillaPersonalDetalle');
@@ -30,6 +30,30 @@ const BlogCategory = require('./BlogCategory');
 const BlogPost = require('./BlogPost');
 const BlogTag = require('./BlogTag');
 const BlogPostTag = require('./BlogPostTag');
+const {
+  WhatsappSolicitudCita,
+  TIPOS_SOLICITUD_WHATSAPP,
+  ESTADOS_SOLICITUD_WHATSAPP
+} = require('./WhatsappSolicitudCita');
+const {
+  WhatsappEvento,
+  DIRECCIONES_WHATSAPP_EVENTO,
+  TIPOS_WHATSAPP_EVENTO,
+  ESTADOS_WHATSAPP_EVENTO
+} = require('./WhatsappEvento');
+const {
+  WhatsappConversacion,
+  CONVERSATION_STATUS,
+  CONVERSATION_STEPS,
+  MAIN_OPTIONS,
+  CONTACT_TYPES: WHATSAPP_CONTACT_TYPES
+} = require('./WhatsappConversacion');
+const { WhatsappAppointmentReminder, REMINDER_STATES, REMINDER_RESPONSES } = require('./WhatsappAppointmentReminder');
+const { WhatsappReceptionReferral, REFERRAL_TYPES, REFERRAL_STATES, REFERRAL_PRIORITIES } = require('./WhatsappReceptionReferral');
+const { WhatsappReceptionReply, REPLY_TYPES, REPLY_STATES } = require('./WhatsappReceptionReply');
+const { InternalNotification, NOTIFICATION_TYPES, NOTIFICATION_STATES, NOTIFICATION_PRIORITIES, NOTIFICATION_ENTITIES } = require('./InternalNotification');
+const { WhatsappTechnicalIncident, INCIDENT_TYPES, INCIDENT_SEVERITIES, INCIDENT_STATES } = require('./WhatsappTechnicalIncident');
+const { WhatsappJobExecution, JOB_NAMES, JOB_STATUSES } = require('./WhatsappJobExecution');
 
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -95,6 +119,48 @@ Usuario.hasMany(Cita, { foreignKey: 'profesional_id', as: 'agenda_profesional' }
 Cita.belongsTo(Usuario, { foreignKey: 'profesional_id', as: 'profesional' });
 Sesion.hasOne(Cita, { foreignKey: 'sesion_id', as: 'programacion' });
 Cita.belongsTo(Sesion, { foreignKey: 'sesion_id', as: 'sesion_clinica' });
+
+Paciente.hasMany(WhatsappSolicitudCita, { foreignKey: 'paciente_id', as: 'solicitudes_whatsapp', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+WhatsappSolicitudCita.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+Cita.hasMany(WhatsappSolicitudCita, { foreignKey: 'cita_id', as: 'solicitudes_whatsapp', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+WhatsappSolicitudCita.belongsTo(Cita, { foreignKey: 'cita_id', as: 'cita', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+WhatsappSolicitudCita.hasMany(WhatsappEvento, { foreignKey: 'solicitud_id', as: 'eventos', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+WhatsappEvento.belongsTo(WhatsappSolicitudCita, { foreignKey: 'solicitud_id', as: 'solicitud', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+Cita.hasMany(WhatsappEvento, { foreignKey: 'cita_id', as: 'eventos_whatsapp', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+WhatsappEvento.belongsTo(Cita, { foreignKey: 'cita_id', as: 'cita', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+Paciente.hasMany(WhatsappConversacion, { foreignKey: 'paciente_id', as: 'conversaciones_whatsapp', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+WhatsappConversacion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+Cita.hasMany(WhatsappAppointmentReminder, { foreignKey: 'cita_id', as: 'recordatorios_whatsapp', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+WhatsappAppointmentReminder.belongsTo(Cita, { foreignKey: 'cita_id', as: 'cita', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+Paciente.hasMany(WhatsappAppointmentReminder, { foreignKey: 'paciente_id', as: 'recordatorios_whatsapp', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+WhatsappAppointmentReminder.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+Paciente.hasMany(WhatsappReceptionReferral, { foreignKey: 'paciente_id', as: 'derivaciones_whatsapp', onDelete: 'RESTRICT' });
+WhatsappReceptionReferral.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente', onDelete: 'RESTRICT' });
+Cita.hasMany(WhatsappReceptionReferral, { foreignKey: 'cita_id', as: 'derivaciones_whatsapp', onDelete: 'RESTRICT' });
+WhatsappReceptionReferral.belongsTo(Cita, { foreignKey: 'cita_id', as: 'cita', onDelete: 'RESTRICT' });
+WhatsappSolicitudCita.hasMany(WhatsappReceptionReferral, { foreignKey: 'solicitud_cita_id', as: 'derivaciones_recepcion', onDelete: 'RESTRICT' });
+WhatsappReceptionReferral.belongsTo(WhatsappSolicitudCita, { foreignKey: 'solicitud_cita_id', as: 'solicitud', onDelete: 'RESTRICT' });
+WhatsappAppointmentReminder.hasMany(WhatsappReceptionReferral, { foreignKey: 'recordatorio_id', as: 'derivaciones_recepcion', onDelete: 'RESTRICT' });
+WhatsappReceptionReferral.belongsTo(WhatsappAppointmentReminder, { foreignKey: 'recordatorio_id', as: 'recordatorio', onDelete: 'RESTRICT' });
+WhatsappConversacion.hasMany(WhatsappReceptionReferral, { foreignKey: 'conversacion_id', as: 'derivaciones_recepcion', onDelete: 'RESTRICT' });
+WhatsappReceptionReferral.belongsTo(WhatsappConversacion, { foreignKey: 'conversacion_id', as: 'conversacion', onDelete: 'RESTRICT' });
+Usuario.hasMany(WhatsappReceptionReferral, { foreignKey: 'responsable_usuario_id', as: 'derivaciones_recepcion', onDelete: 'RESTRICT' });
+WhatsappReceptionReferral.belongsTo(Usuario, { foreignKey: 'responsable_usuario_id', as: 'responsable', onDelete: 'RESTRICT' });
+WhatsappReceptionReferral.hasMany(WhatsappReceptionReply, { foreignKey: 'derivacion_id', as: 'respuestas', onDelete: 'RESTRICT' });
+WhatsappReceptionReply.belongsTo(WhatsappReceptionReferral, { foreignKey: 'derivacion_id', as: 'derivacion', onDelete: 'RESTRICT' });
+Usuario.hasMany(WhatsappReceptionReply, { foreignKey: 'usuario_id', as: 'respuestas_recepcion_whatsapp', onDelete: 'RESTRICT' });
+WhatsappReceptionReply.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'usuario', onDelete: 'RESTRICT' });
+Usuario.hasMany(InternalNotification, { foreignKey: 'usuario_id', as: 'notificaciones_internas', onDelete: 'RESTRICT' });
+InternalNotification.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'destinatario', onDelete: 'RESTRICT' });
+WhatsappReceptionReferral.hasMany(InternalNotification, { foreignKey: 'derivacion_id', as: 'notificaciones', onDelete: 'RESTRICT' });
+InternalNotification.belongsTo(WhatsappReceptionReferral, { foreignKey: 'derivacion_id', as: 'derivacion', onDelete: 'RESTRICT' });
+WhatsappReceptionReply.hasMany(InternalNotification, { foreignKey: 'respuesta_recepcion_id', as: 'notificaciones', onDelete: 'RESTRICT' });
+InternalNotification.belongsTo(WhatsappReceptionReply, { foreignKey: 'respuesta_recepcion_id', as: 'respuesta_recepcion', onDelete: 'RESTRICT' });
+WhatsappAppointmentReminder.hasMany(WhatsappTechnicalIncident,{foreignKey:'recordatorio_id',as:'incidentes_tecnicos',onDelete:'RESTRICT'}); WhatsappTechnicalIncident.belongsTo(WhatsappAppointmentReminder,{foreignKey:'recordatorio_id',as:'recordatorio',onDelete:'RESTRICT'});
+WhatsappReceptionReply.hasMany(WhatsappTechnicalIncident,{foreignKey:'respuesta_recepcion_id',as:'incidentes_tecnicos',onDelete:'RESTRICT'}); WhatsappTechnicalIncident.belongsTo(WhatsappReceptionReply,{foreignKey:'respuesta_recepcion_id',as:'respuesta_recepcion',onDelete:'RESTRICT'});
+WhatsappReceptionReferral.hasMany(WhatsappTechnicalIncident,{foreignKey:'derivacion_id',as:'incidentes_tecnicos',onDelete:'RESTRICT'}); WhatsappTechnicalIncident.belongsTo(WhatsappReceptionReferral,{foreignKey:'derivacion_id',as:'derivacion',onDelete:'RESTRICT'});
+WhatsappEvento.hasMany(WhatsappTechnicalIncident,{foreignKey:'evento_id',as:'incidentes_tecnicos',onDelete:'RESTRICT'}); WhatsappTechnicalIncident.belongsTo(WhatsappEvento,{foreignKey:'evento_id',as:'evento',onDelete:'RESTRICT'});
+WhatsappTechnicalIncident.belongsTo(Usuario,{foreignKey:'revisado_por_usuario_id',as:'revisado_por',onDelete:'RESTRICT'}); WhatsappTechnicalIncident.belongsTo(Usuario,{foreignKey:'cancelado_por_usuario_id',as:'cancelado_por',onDelete:'RESTRICT'});
 
 Usuario.hasOne(Personal, { foreignKey: 'usuario_id', as: 'ficha_personal', onDelete: 'SET NULL' });
 Personal.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'usuario' });
@@ -192,6 +258,7 @@ module.exports = {
   Cita,
   ESTADOS_CITA,
   TIPOS_ATENCION,
+  BLOCKING_APPOINTMENT_STATUSES,
   Personal,
   PlanillaPersonal,
   PlanillaPersonalDetalle,
@@ -207,5 +274,35 @@ module.exports = {
   BlogCategory,
   BlogPost,
   BlogTag,
-  BlogPostTag
+  BlogPostTag,
+  WhatsappSolicitudCita,
+  TIPOS_SOLICITUD_WHATSAPP,
+  ESTADOS_SOLICITUD_WHATSAPP,
+  WhatsappEvento,
+  DIRECCIONES_WHATSAPP_EVENTO,
+  TIPOS_WHATSAPP_EVENTO,
+  ESTADOS_WHATSAPP_EVENTO
+  ,
+  WhatsappConversacion,
+  CONVERSATION_STATUS,
+  CONVERSATION_STEPS,
+  MAIN_OPTIONS,
+  WHATSAPP_CONTACT_TYPES
+  , WhatsappAppointmentReminder
+  , REMINDER_STATES
+  , REMINDER_RESPONSES
+  , WhatsappReceptionReferral
+  , REFERRAL_TYPES
+  , REFERRAL_STATES
+  , REFERRAL_PRIORITIES
+  , WhatsappReceptionReply
+  , REPLY_TYPES
+  , REPLY_STATES
+  , InternalNotification
+  , NOTIFICATION_TYPES
+  , NOTIFICATION_STATES
+  , NOTIFICATION_PRIORITIES
+  , NOTIFICATION_ENTITIES
+  , WhatsappTechnicalIncident, INCIDENT_TYPES, INCIDENT_SEVERITIES, INCIDENT_STATES
+  , WhatsappJobExecution, JOB_NAMES, JOB_STATUSES
 };

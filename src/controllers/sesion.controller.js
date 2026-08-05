@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const { Cita, DocumentoClinico, EvaluacionFinal, HistoriaClinica, IntervencionClinica, Paciente, Personal, Sesion, Usuario, sequelize } = require('../models');
 const { sincronizarSemana } = require('../services/sesionSemanalSync.service');
 const { sincronizarConceptoSesion } = require('../services/planillaPagosSync.service');
+const { findAndLockAppointmentForSession, syncAppointmentFromSession } = require('../services/citaSesionLink.service');
 
 const includeSesion = [
   { model: Paciente, as: 'paciente' },
@@ -478,6 +479,7 @@ const crearSesion = async (req, res, next) => {
       return res.status(400).json({ message: preparado.error });
     }
     const payload = { ...preparado.payload, numero_sesion: programacion?.numero_sesion || preparado.payload.numero_sesion };
+    if (!programacion) programacion = await findAndLockAppointmentForSession(payload, { transaction });
     const duplicada = await Sesion.findOne({
       where: {
         paciente_id: payload.paciente_id,
@@ -545,6 +547,7 @@ const actualizarSesion = async (req, res, next) => {
     }
 
     await sesion.update(payload, { transaction });
+    await syncAppointmentFromSession(sesion, { transaction });
     const fechasAfectadas = await recalcularProgresoHistoria(payload.historia_clinica_id, transaction);
     if (String(origen.historia_clinica_id) !== String(payload.historia_clinica_id)) {
       fechasAfectadas.push(...await recalcularProgresoHistoria(origen.historia_clinica_id, transaction));

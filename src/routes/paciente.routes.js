@@ -4,6 +4,7 @@ const autorizarRoles = require('../middlewares/role.middleware');
 const { filtrarRespuestaFinanciera } = require('../middlewares/financialAccess.middleware');
 const {
   listarPacientes,
+  listarPendientesWhatsapp,
   validarDuplicados,
   obtenerPaciente,
   obtenerSeccionPaciente,
@@ -19,6 +20,7 @@ const { resumenPaciente, auditarResumenPaciente } = require('../controllers/resu
 router.use(autenticar, filtrarRespuestaFinanciera);
 
 router.get('/', listarPacientes);
+router.get('/pendientes-whatsapp', autorizarRoles('admin', 'personal'), listarPendientesWhatsapp);
 router.get('/validar-duplicados', validarDuplicados);
 router.get('/:id/resumen', resumenPaciente);
 router.post('/:id/resumen/auditoria', auditarResumenPaciente);

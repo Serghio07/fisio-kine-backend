@@ -6,6 +6,8 @@ process.env.TZ = process.env.TZ || 'America/La_Paz';
 
 const app = require('./app');
 const { sequelize } = require('./models');
+const { startAppointmentReminderJob } = require('./jobs/appointmentReminder.job');
+const { startPendingReferralAlertJob } = require('./jobs/pendingReferralAlert.job');
 
 const PORT = process.env.PORT || 3000;
 
@@ -17,13 +19,12 @@ const iniciarServidor = async () => {
     await sequelize.authenticate();
     console.log('Conexion a PostgreSQL establecida');
 
-    if (process.env.DB_SYNC === 'true') {
-      await sequelize.sync({ alter: true });
-      console.log('Modelos sincronizados con la base de datos');
-    }
+    if (process.env.DB_SYNC !== 'false') throw new Error('DB_SYNC debe permanecer en false; use migraciones controladas');
 
     app.listen(PORT, () => {
       console.log(`Servidor corriendo en http://localhost:${PORT}`);
+      startAppointmentReminderJob();
+      startPendingReferralAlertJob();
     });
   } catch (error) {
     console.error('No se pudo iniciar el servidor:', error.message);

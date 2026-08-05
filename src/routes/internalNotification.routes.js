@@ -1,0 +1,11 @@
+const router = require('express').Router();
+const autenticar = require('../middlewares/auth.middleware');
+const autorizarRoles = require('../middlewares/role.middleware');
+const controller = require('../controllers/internalNotification.controller');
+router.use(autenticar, autorizarRoles('admin', 'personal'));
+router.get('/', controller.listar);
+router.get('/resumen', controller.resumen);
+router.get('/recientes', controller.recientes);
+router.patch('/leer-todas', controller.leerTodas);
+router.patch('/:id/leer', controller.leer);
+module.exports = router;

@@ -2,6 +2,7 @@ const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
 const ESTADOS_CITA = ['Pendiente', 'Programada', 'Confirmada', 'Atendida', 'Cancelada', 'Reprogramada', 'No asistio', 'Falto'];
+const BLOCKING_APPOINTMENT_STATUSES = Object.freeze(['Pendiente', 'Programada', 'Confirmada']);
 const TIPOS_ATENCION = ['Primera consulta', 'Sesion de fisioterapia', 'Sesion de tratamiento', 'Evaluacion', 'Control', 'Rehabilitacion', 'Otro'];
 
 const Cita = sequelize.define(
@@ -51,4 +52,5 @@ module.exports = {
   Cita,
   ESTADOS_CITA,
   TIPOS_ATENCION
+  , BLOCKING_APPOINTMENT_STATUSES
 };

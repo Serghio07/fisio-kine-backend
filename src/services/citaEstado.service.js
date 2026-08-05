@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
-const { Cita } = require('../models');
+const { Cita, sequelize } = require('../models');
 const { boliviaDate, boliviaTime } = require('../utils/boliviaDateTime');
+const { ensureNoShowSession } = require('./citaSesionLink.service');
 
 const ESTADOS_SIN_ASISTENCIA = ['Pendiente', 'Programada', 'Confirmada'];
 
@@ -8,10 +9,8 @@ const actualizarCitasNoAsistidas = async (transaction = null) => {
   const fechaActual = boliviaDate();
   const horaActual = boliviaTime(new Date(), false);
 
-  return Cita.update(
-    { estado: 'No asistio' },
-    {
-      where: {
+  const execute = async (activeTransaction) => {
+    const appointments = await Cita.findAll({ where: {
         estado: { [Op.in]: ESTADOS_SIN_ASISTENCIA },
         sesion_id: null,
         [Op.or]: [
@@ -24,10 +23,14 @@ const actualizarCitasNoAsistidas = async (transaction = null) => {
             ]
           }
         ]
-      },
-      transaction
+      }, transaction: activeTransaction, lock: activeTransaction.LOCK.UPDATE });
+    for (const appointment of appointments) {
+      await appointment.update({ estado: 'No asistio' }, { transaction: activeTransaction });
+      await ensureNoShowSession(appointment, { transaction: activeTransaction });
     }
-  );
+    return [appointments.length];
+  };
+  return transaction ? execute(transaction) : sequelize.transaction(execute);
 };
 
 module.exports = { actualizarCitasNoAsistidas };

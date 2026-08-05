@@ -1,0 +1,21 @@
+const router = require('express').Router();
+const autenticar = require('../middlewares/auth.middleware');
+const autorizarRoles = require('../middlewares/role.middleware');
+const controller = require('../controllers/whatsappReceptionReferral.controller');
+
+router.use(autenticar, autorizarRoles('admin', 'personal'));
+router.get('/', controller.listar);
+router.get('/resumen', controller.resumen);
+router.get('/:id', controller.detalle);
+router.get('/:id/respuestas/configuracion', controller.configuracionRespuestas);
+router.get('/:id/respuestas', controller.listarRespuestas);
+router.post('/:id/respuestas/preview', controller.previsualizarRespuesta);
+router.post('/:id/respuestas/:respuestaId/confirmar', controller.confirmarRespuesta);
+router.post('/:id/respuestas/:respuestaId/reintentar', controller.reintentarRespuesta);
+router.post('/:id/respuestas/:respuestaId/cancelar', controller.cancelarRespuesta);
+router.post('/:id/tomar', controller.tomar);
+router.patch('/:id/prioridad', controller.prioridad);
+router.post('/:id/observaciones', controller.observar);
+router.post('/:id/resolver', controller.resolver);
+router.post('/:id/cerrar', controller.cerrar);
+module.exports = router;

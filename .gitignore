@@ -6,7 +6,14 @@ node_modules/
 npm-debug.log*
 logs/
 *.log
+coverage/
+dist/
 /backups/
+tmp/
+uploads/temp/
+*.sql.gz
+*.dump
+*.backup
 /credentials/
 *.credentials.json
 *.secret

@@ -2,6 +2,8 @@ const { Op } = require('sequelize');
 const { Cita, ESTADOS_CITA, EvaluacionFinal, HistoriaClinica, Paciente, Personal, Sesion, TIPOS_ATENCION, Usuario, sequelize } = require('../models');
 const { boliviaDate } = require('../utils/boliviaDateTime');
 const { actualizarCitasNoAsistidas } = require('../services/citaEstado.service');
+const { BLOCKING_APPOINTMENT_STATUSES } = require('../services/appointmentAvailability.service');
+const { ensureNoShowSession } = require('../services/citaSesionLink.service');
 
 const includeCita = [
   { model: Paciente, as: 'paciente' },
@@ -53,14 +55,14 @@ const validarCita = (body) => {
 };
 
 const validarSolapamiento = async (payload, citaId = null) => {
-  if (payload.estado === 'Cancelada') return null;
+  if (!BLOCKING_APPOINTMENT_STATUSES.includes(payload.estado)) return null;
 
   const inicio = payload.hora_inicio;
   if (!payload.hora_fin) {
     const where = {
       fecha: payload.fecha,
       hora_inicio: inicio,
-      estado: { [Op.ne]: 'Cancelada' }
+      estado: { [Op.in]: BLOCKING_APPOINTMENT_STATUSES }
     };
     if (citaId) where.id = { [Op.ne]: citaId };
     const citaExistente = await Cita.findOne({ where });
@@ -70,7 +72,7 @@ const validarSolapamiento = async (payload, citaId = null) => {
   const fin = payload.hora_fin;
   const where = {
     fecha: payload.fecha,
-    estado: { [Op.ne]: 'Cancelada' },
+    estado: { [Op.in]: BLOCKING_APPOINTMENT_STATUSES },
     [Op.and]: [
       { hora_inicio: { [Op.lt]: fin } },
       { [Op.or]: [{ hora_fin: { [Op.gt]: inicio } }, { hora_fin: null, hora_inicio: { [Op.gte]: inicio, [Op.lt]: fin } }] }
@@ -232,7 +234,7 @@ const obtenerCita = async (req, res, next) => {
 
 const crearCita = async (req, res, next) => {
   try {
-    const payload = normalizarCita(req.body);
+    const payload = normalizarCita({ ...req.body, estado: 'Pendiente', profesional_id: req.user.id });
     const errorValidacion = validarCita(payload);
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
 
@@ -244,8 +246,9 @@ const crearCita = async (req, res, next) => {
 
     const cita = await Cita.create({
       ...payload,
-      usuario_id: req.usuario.id,
-      profesional_id: payload.profesional_id || req.usuario.id
+      estado: 'Pendiente',
+      usuario_id: req.user.id,
+      profesional_id: req.user.id
     });
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     return res.status(201).json(citaCompleta);
@@ -255,24 +258,28 @@ const crearCita = async (req, res, next) => {
 };
 
 const actualizarCita = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
   try {
-    const cita = await Cita.findByPk(req.params.id);
-    if (!cita) return res.status(404).json({ message: 'Cita no encontrada' });
+    const cita = await Cita.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!cita) { await transaction.rollback(); return res.status(404).json({ message: 'Cita no encontrada' }); }
 
     const payload = normalizarCita({ ...cita.toJSON(), ...req.body });
     const errorValidacion = validarCita(payload);
-    if (errorValidacion) return res.status(400).json({ message: errorValidacion });
+    if (errorValidacion) { await transaction.rollback(); return res.status(400).json({ message: errorValidacion }); }
 
-    const paciente = await Paciente.findByPk(payload.paciente_id);
-    if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado' });
+    const paciente = await Paciente.findByPk(payload.paciente_id, { transaction });
+    if (!paciente) { await transaction.rollback(); return res.status(404).json({ message: 'Paciente no encontrado' }); }
 
     const errorSolapamiento = await validarSolapamiento(payload, cita.id);
-    if (errorSolapamiento) return res.status(409).json({ message: errorSolapamiento });
+    if (errorSolapamiento) { await transaction.rollback(); return res.status(409).json({ message: errorSolapamiento }); }
 
-    await cita.update(payload);
+    await cita.update(payload, { transaction });
+    if (['No asistio', 'Falto'].includes(payload.estado)) await ensureNoShowSession(cita, { transaction });
+    await transaction.commit();
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     return res.json(citaCompleta);
   } catch (error) {
+    if (!transaction.finished) await transaction.rollback();
     return next(error);
   }
 };
@@ -290,15 +297,19 @@ const eliminarCita = async (req, res, next) => {
 };
 
 const cambiarEstadoCita = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
   try {
-    const cita = await Cita.findByPk(req.params.id);
-    if (!cita) return res.status(404).json({ message: 'Cita no encontrada' });
-    if (!ESTADOS_CITA.includes(req.body.estado)) return res.status(400).json({ message: 'estado no es valido' });
+    const cita = await Cita.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!cita) { await transaction.rollback(); return res.status(404).json({ message: 'Cita no encontrada' }); }
+    if (!ESTADOS_CITA.includes(req.body.estado)) { await transaction.rollback(); return res.status(400).json({ message: 'estado no es valido' }); }
 
-    await cita.update({ estado: req.body.estado });
+    await cita.update({ estado: req.body.estado }, { transaction });
+    if (['No asistio', 'Falto'].includes(req.body.estado)) await ensureNoShowSession(cita, { transaction });
+    await transaction.commit();
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     return res.json(citaCompleta);
   } catch (error) {
+    if (!transaction.finished) await transaction.rollback();
     return next(error);
   }
 };
@@ -377,5 +388,5 @@ module.exports = {
   listarCitasHoy: listarPeriodo('hoy'),
   listarCitasSemana: listarPeriodo('semana'),
   listarCitasMes: listarPeriodo('mes')
-  , obtenerProgramacionHistoria, validarDisponibilidad, crearProgramacion
+  , obtenerProgramacionHistoria, validarDisponibilidad, crearProgramacion, validarSolapamiento
 };
