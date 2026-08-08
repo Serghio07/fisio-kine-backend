@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { scopeKeyFor, minimalContext, createOrReuseReceptionReferral } = require('../../src/services/whatsappReceptionReferral.service');
-const { maskPhone, dto, mutate } = require('../../src/services/receptionReferralManagement.service');
+const { maskPhone, dto, list, mutate, summary } = require('../../src/services/receptionReferralManagement.service');
 
 const transaction = { LOCK: { UPDATE: 'UPDATE' } };
 const conversation = { id: 4, telefono: '591 60000000', paciente_id: 8 };
@@ -39,14 +39,36 @@ test('detalle de registro pendiente muestra nombre motivo fecha y horario de la 
   assert.deepEqual(output.solicitud, { nombre: 'Cookie Pérez', motivo: 'Dolor de rodilla', fecha: '2026-08-08', hora_inicio: '10:00', hora_fin: '11:30', estado: 'DERIVADA_PERSONAL' });
 });
 
+test('detalle cerrado automáticamente expone resultado final y nunca acción pendiente', () => {
+  const output = dto({ id: 8, tipo_derivacion: 'REGISTRO_PACIENTE', estado: 'CERRADA', prioridad: 'NORMAL', telefono_normalizado: '591600005637', paciente: null, responsable: null, cita: null, resolucion: 'Paciente temporal no asistió a la cita. Solicitud cerrada automáticamente.', historial: [{ accion: 'CIERRE_AUTOMATICO' }], created_at: new Date(), updated_at: new Date() }, true);
+  assert.equal(output.estado, 'CERRADA');
+  assert.equal(output.cierre_automatico, true);
+  assert.equal(output.resultado, 'No asistió');
+  assert.equal(output.responsable, null);
+});
+
+test('bandeja predeterminada consulta solo pendientes y en atención', async () => {
+  let options;
+  await list({ query: {}, model: { sequelize: { literal: (value) => value }, findAndCountAll: async (value) => { options = value; return { rows: [], count: 0 }; } } });
+  const states = options.where.estado[Object.getOwnPropertySymbols(options.where.estado)[0]];
+  assert.deepEqual(states, ['PENDIENTE', 'EN_ATENCION']);
+});
+
+test('resumen no cuenta solicitudes cerradas', async () => {
+  const queried = [];
+  const result = await summary({ count: async ({ where }) => { queried.push(where.estado); return where.estado === 'PENDIENTE' ? 2 : 1; } });
+  assert.deepEqual(result, { pendientes: 2, en_atencion: 1 });
+  assert.deepEqual(queried, ['PENDIENTE', 'EN_ATENCION']);
+});
+
 test('tomar usa lock, asigna solo una vez y registra auditoria', async () => {
   const item = entity({ id: 5, paciente_id: null, estado: 'PENDIENTE', historial: [], responsable_usuario_id: null }); let audits = 0;
   const db = { transaction: async (callback) => callback(transaction) };
   const model = { findByPk: async (id, options) => { assert.equal(options.lock, 'UPDATE'); return item; } };
   const models = require('../../src/models'); const original = models.ActividadSistema.create; models.ActividadSistema.create = async () => { audits += 1; };
-  try { await mutate({ id: 5, user: { id: 7, rol: 'personal' }, action: 'TOMADA', db, model, now: new Date('2026-08-04T14:00:00Z') }); } finally { models.ActividadSistema.create = original; }
+  try { await mutate({ id: 5, user: { id: 7, rol: 'personal' }, action: 'TOMADA', db, model, now: new Date('2026-08-04T14:00:00Z'), syncNotifications: async () => 0 }); } finally { models.ActividadSistema.create = original; }
   assert.equal(item.estado, 'EN_ATENCION'); assert.equal(item.responsable_usuario_id, 7); assert.ok(item.tomada_en); assert.equal(audits, 1);
-  await assert.rejects(() => mutate({ id: 5, user: { id: 8, rol: 'personal' }, action: 'TOMADA', db, model }), (error) => error.status === 409);
+  await assert.rejects(() => mutate({ id: 5, user: { id: 8, rol: 'personal' }, action: 'TOMADA', db, model, syncNotifications: async () => 0 }), (error) => error.status === 409);
 });
 
 test('resolver y cerrar exigen responsable y estados compatibles', async () => {
@@ -54,8 +76,8 @@ test('resolver y cerrar exigen responsable y estados compatibles', async () => {
   const db = { transaction: async (callback) => callback(transaction) }; const model = { findByPk: async () => item };
   const models = require('../../src/models'); const original = models.ActividadSistema.create; models.ActividadSistema.create = async () => {};
   try {
-    await assert.rejects(() => mutate({ id: 5, user: { id: 8, rol: 'personal' }, action: 'RESUELTA', value: 'Hecho', db, model }), (error) => error.status === 403);
-    await mutate({ id: 5, user: { id: 7, rol: 'personal' }, action: 'RESUELTA', value: 'Registro revisado', db, model }); assert.equal(item.estado, 'RESUELTA');
-    await mutate({ id: 5, user: { id: 7, rol: 'personal' }, action: 'CERRADA', db, model }); assert.equal(item.estado, 'CERRADA');
+    await assert.rejects(() => mutate({ id: 5, user: { id: 8, rol: 'personal' }, action: 'RESUELTA', value: 'Hecho', db, model, syncNotifications: async () => 0 }), (error) => error.status === 403);
+    await mutate({ id: 5, user: { id: 7, rol: 'personal' }, action: 'RESUELTA', value: 'Registro revisado', db, model, syncNotifications: async () => 0 }); assert.equal(item.estado, 'RESUELTA');
+    await mutate({ id: 5, user: { id: 7, rol: 'personal' }, action: 'CERRADA', db, model, syncNotifications: async () => 0 }); assert.equal(item.estado, 'CERRADA');
   } finally { models.ActividadSistema.create = original; }
 });

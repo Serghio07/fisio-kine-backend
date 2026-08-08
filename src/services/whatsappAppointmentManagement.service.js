@@ -8,6 +8,7 @@ const {
 const availabilityDefault = require('./appointmentAvailability.service');
 const { MESSAGES: REQUEST_MESSAGES, parsePreferredDate, sanitizeFirstName, cleanText } = require('./whatsappAppointmentRequest.service');
 const { createOrReuseReceptionReferral } = require('./whatsappReceptionReferral.service');
+const { cleanupTemporaryWhatsappNoShow } = require('./temporaryWhatsappPatientCleanup.service');
 
 const VISIBLE_STATUSES = Object.freeze(['Pendiente', 'Programada', 'Confirmada']);
 const managementSteps = new Set([
@@ -96,7 +97,7 @@ const offerRescheduleSlots = async ({ conversation, management, date, appointmen
 
 const appendHistory = (appointment, entry) => [...(Array.isArray(appointment.historial_programacion) ? appointment.historial_programacion : []), entry];
 
-const processManagementStep = async ({ conversation, message, appointmentModel = Cita, patientModel = Paciente, referralModel, transaction, db, activity, now, availability = availabilityDefault }) => {
+const processManagementStep = async ({ conversation, message, appointmentModel = Cita, patientModel = Paciente, referralModel, transaction, db, activity, now, availability = availabilityDefault, cleanupTemporary = cleanupTemporaryWhatsappNoShow }) => {
   const step = conversation.paso_actual;
   const choice = normalize(message);
   if ([CONVERSATION_STEPS.START_APPOINTMENTS, CONVERSATION_STEPS.START_RESCHEDULE_CANCEL].includes(step)) {
@@ -165,6 +166,7 @@ const processManagementStep = async ({ conversation, message, appointmentModel =
     if (!VISIBLE_STATUSES.includes(appointment.estado) || !isFuture(appointment, now)) return { responseText: 'Esta cita ya comenzó o cambió de estado y no puede modificarse desde WhatsApp.\n\nComunícate con recepción.', responseKind: 'APPOINTMENT_NOT_MANAGEABLE', conversationStep: step };
     try {
       await appointment.update({ estado: 'Cancelada', historial_programacion: appendHistory(appointment, { accion: 'CANCELACION_WHATSAPP', estado_anterior: appointment.estado, estado_nuevo: 'Cancelada', registrado_en: now.toISOString() }) }, { transaction });
+      await cleanupTemporary(appointment, { transaction });
       await conversation.update({ paso_actual: CONVERSATION_STEPS.APPOINTMENT_CANCELLED, contexto: baseContext(conversation), ...activity }, { transaction });
     } catch (cause) { const error = new Error('No fue posible cancelar la cita'); error.code = 'WHATSAPP_APPOINTMENT_MANAGEMENT_FAILED'; error.cause = cause; throw error; }
     console.info('[WhatsApp] Cita cancelada');

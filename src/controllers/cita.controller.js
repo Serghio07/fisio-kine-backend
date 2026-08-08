@@ -4,6 +4,8 @@ const { boliviaDate } = require('../utils/boliviaDateTime');
 const { actualizarCitasNoAsistidas } = require('../services/citaEstado.service');
 const { BLOCKING_APPOINTMENT_STATUSES } = require('../services/appointmentAvailability.service');
 const { ensureNoShowSession } = require('../services/citaSesionLink.service');
+const { cleanupTemporaryWhatsappNoShow } = require('../services/temporaryWhatsappPatientCleanup.service');
+const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
 
 const includeCita = [
   { model: Paciente, as: 'paciente' },
@@ -21,6 +23,21 @@ const includeCita = [
   { model: HistoriaClinica, as: 'historia_clinica', include: [{ model: EvaluacionFinal, as: 'evaluacion_final' }] },
   { model: Usuario, as: 'profesional', attributes: ['id', 'nombre', 'usuario', 'foto'] },
   { model: Sesion, as: 'sesion_clinica', attributes: ['id', 'fecha', 'numero_sesion', 'asistencia'] }
+];
+
+const includeCitaAgenda = [
+  {
+    model: Paciente,
+    as: 'paciente',
+    required: true,
+    where: {
+      [Op.or]: [
+        { estado: true },
+        { registro_pendiente: false }
+      ]
+    }
+  },
+  ...includeCita.slice(1)
 ];
 
 const normalizarHora = (value) => {
@@ -212,7 +229,7 @@ const listarCitas = async (req, res, next) => {
     await actualizarCitasNoAsistidas();
     const citas = await Cita.findAll({
       where: buildFiltros(req.query),
-      include: includeCita,
+      include: includeCitaAgenda,
       order: [['fecha', 'DESC'], ['hora_inicio', 'ASC']]
     });
     return res.json(citas);
@@ -239,7 +256,8 @@ const crearCita = async (req, res, next) => {
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
 
     const paciente = await Paciente.findByPk(payload.paciente_id);
-    if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado' });
+    const pacienteError = clinicalPatientEligibilityError(paciente);
+    if (pacienteError) return res.status(pacienteError.status).json({ message: pacienteError.message });
 
     const errorSolapamiento = await validarSolapamiento(payload);
     if (errorSolapamiento) return res.status(409).json({ message: errorSolapamiento });
@@ -268,13 +286,17 @@ const actualizarCita = async (req, res, next) => {
     if (errorValidacion) { await transaction.rollback(); return res.status(400).json({ message: errorValidacion }); }
 
     const paciente = await Paciente.findByPk(payload.paciente_id, { transaction });
-    if (!paciente) { await transaction.rollback(); return res.status(404).json({ message: 'Paciente no encontrado' }); }
+    const pacienteError = clinicalPatientEligibilityError(paciente);
+    if (pacienteError) { await transaction.rollback(); return res.status(pacienteError.status).json({ message: pacienteError.message }); }
 
     const errorSolapamiento = await validarSolapamiento(payload, cita.id);
     if (errorSolapamiento) { await transaction.rollback(); return res.status(409).json({ message: errorSolapamiento }); }
 
     await cita.update(payload, { transaction });
-    if (['No asistio', 'Falto'].includes(payload.estado)) await ensureNoShowSession(cita, { transaction });
+    if (['No asistio', 'Cancelada'].includes(payload.estado)) {
+      const cleanup = await cleanupTemporaryWhatsappNoShow(cita, { transaction });
+      if (payload.estado === 'No asistio' && !cleanup.temporary) await ensureNoShowSession(cita, { transaction });
+    } else if (payload.estado === 'Falto') await ensureNoShowSession(cita, { transaction });
     await transaction.commit();
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     return res.json(citaCompleta);
@@ -304,7 +326,10 @@ const cambiarEstadoCita = async (req, res, next) => {
     if (!ESTADOS_CITA.includes(req.body.estado)) { await transaction.rollback(); return res.status(400).json({ message: 'estado no es valido' }); }
 
     await cita.update({ estado: req.body.estado }, { transaction });
-    if (['No asistio', 'Falto'].includes(req.body.estado)) await ensureNoShowSession(cita, { transaction });
+    if (['No asistio', 'Cancelada'].includes(req.body.estado)) {
+      const cleanup = await cleanupTemporaryWhatsappNoShow(cita, { transaction });
+      if (req.body.estado === 'No asistio' && !cleanup.temporary) await ensureNoShowSession(cita, { transaction });
+    } else if (req.body.estado === 'Falto') await ensureNoShowSession(cita, { transaction });
     await transaction.commit();
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     return res.json(citaCompleta);
@@ -336,7 +361,7 @@ const listarCalendario = async (req, res, next) => {
     await actualizarCitasNoAsistidas();
     const citas = await Cita.findAll({
       where: buildFiltros(req.query),
-      include: includeCita,
+      include: includeCitaAgenda,
       order: [['fecha', 'ASC'], ['hora_inicio', 'ASC']]
     });
     return res.json(citas);
@@ -367,7 +392,7 @@ const listarPeriodo = (tipo) => async (req, res, next) => {
     const fechaFin = boliviaDate(fin);
     const citas = await Cita.findAll({
       where: { fecha: { [Op.between]: [fechaInicio, fechaFin] } },
-      include: includeCita,
+      include: includeCitaAgenda,
       order: [['fecha', 'ASC'], ['hora_inicio', 'ASC']]
     });
     return res.json(citas);

@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const { FINANCIAL_KEYS } = require('../middlewares/financialAccess.middleware');
+const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
 const {
   sequelize,
   DocumentoClinico,
@@ -325,9 +326,10 @@ const crearDocumento = async (req, res, next) => {
     }
 
     const paciente = await Paciente.findByPk(body.paciente_id, { transaction });
-    if (!paciente) {
+    const pacienteError = clinicalPatientEligibilityError(paciente);
+    if (pacienteError) {
       await transaction.rollback();
-      return res.status(404).json({ message: 'Paciente no encontrado' });
+      return res.status(pacienteError.status).json({ message: pacienteError.message });
     }
     const errorHistoria = await validarHistoriasSeleccionadas(body, transaction);
     if (errorHistoria) {

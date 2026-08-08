@@ -4,6 +4,7 @@ const { Cita, DocumentoClinico, EvaluacionFinal, HistoriaClinica, IntervencionCl
 const { sincronizarSemana } = require('../services/sesionSemanalSync.service');
 const { sincronizarConceptoSesion } = require('../services/planillaPagosSync.service');
 const { findAndLockAppointmentForSession, syncAppointmentFromSession } = require('../services/citaSesionLink.service');
+const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
 
 const includeSesion = [
   { model: Paciente, as: 'paciente' },
@@ -439,9 +440,10 @@ const crearSesion = async (req, res, next) => {
     }
 
     const paciente = await Paciente.findByPk(req.body.paciente_id, { transaction });
-    if (!paciente) {
+    const pacienteError = clinicalPatientEligibilityError(paciente);
+    if (pacienteError) {
       await transaction.rollback();
-      return res.status(404).json({ message: 'Paciente no encontrado' });
+      return res.status(pacienteError.status).json({ message: pacienteError.message });
     }
 
     await sequelize.query('SELECT pg_advisory_xact_lock(:paciente, :historia)', {
@@ -540,6 +542,12 @@ const actualizarSesion = async (req, res, next) => {
       return res.status(400).json({ message: preparado.error });
     }
     const payload = preparado.payload;
+    const paciente = await Paciente.findByPk(payload.paciente_id, { transaction });
+    const pacienteError = clinicalPatientEligibilityError(paciente);
+    if (pacienteError) {
+      await transaction.rollback();
+      return res.status(pacienteError.status).json({ message: pacienteError.message });
+    }
     const errorValidacion = validarSesion(payload);
     if (errorValidacion) {
       await transaction.rollback();

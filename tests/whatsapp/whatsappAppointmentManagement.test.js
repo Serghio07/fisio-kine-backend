@@ -16,7 +16,7 @@ const modelFor = (items) => ({
   findAll: async (options) => { assert.deepEqual(options.attributes.includes('motivo'), false); return items; },
   findOne: async (options) => items.find((item) => item.id === options.where.id && item.paciente_id === options.where.paciente_id) || null
 });
-const run = (chat, message, items, extra = {}) => processManagementStep({ conversation: chat, message, appointmentModel: modelFor(items), patientModel: { findByPk: async () => ({ id: 5, estado: true, registro_pendiente: false }) }, referralModel: { findOne: async () => null, create: async (data) => ({ id: 1, ...data }) }, transaction, db, activity, now, availability, ...extra });
+const run = (chat, message, items, extra = {}) => processManagementStep({ conversation: chat, message, appointmentModel: modelFor(items), patientModel: { findByPk: async () => ({ id: 5, estado: true, registro_pendiente: false }) }, referralModel: { findOne: async () => null, create: async (data) => ({ id: 1, ...data }) }, transaction, db, activity, now, availability, cleanupTemporary: async () => ({ temporary: false }), ...extra });
 
 test('regla futura usa America La Paz y excluye citas iniciadas', () => {
   assert.equal(isFuture(appointment({ fecha: '2026-08-04', hora_inicio: '10:01' }), now), true);

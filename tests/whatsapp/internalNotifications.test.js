@@ -39,6 +39,15 @@ test('marcar todas actualiza solo NO_LEIDA del usuario actual', async () => {
   let where; const db = { transaction: async callback => callback({}) }; const model = { update: async (_, options) => { where = options.where; return [0]; } }; const result = await service.markAllRead({ userId: 9, db, model }); assert.deepEqual(where, { usuario_id: 9, estado: 'NO_LEIDA' }); assert.equal(result.actualizadas, 0);
 });
 
+test('sincroniza automáticamente todas las notificaciones abiertas de una derivación', async () => {
+  let values; let where; const transaction = {};
+  const count = await service.markReferralNotificationsRead({ referralId: 8, transaction, now: new Date('2026-08-07T20:00:00Z'), model: { update: async (data, options) => { values = data; where = options.where; assert.equal(options.transaction, transaction); return [3]; } } });
+  assert.equal(count, 3);
+  assert.equal(values.estado, 'LEIDA');
+  assert.equal(where.derivacion_id, 8);
+  assert.equal(where.estado, 'NO_LEIDA');
+});
+
 test('nueva derivación notifica solo usuarios activos devueltos y usa claves deterministas', async () => {
   let data; const userModel = { findAll: async ({ where }) => { assert.equal(where.estado, 'activo'); assert.equal(where.activo, true); return [{ id: 1 }, { id: 3 }]; } }; const notificationService = { createForUsers: async value => { data = value; return []; } };
   await triggers.newReferral({ id: 44 }, { userModel, notificationService }); assert.deepEqual(data.userIds, [1, 3]); assert.equal(data.idempotencyKey(3), 'new-referral:44:3'); assert.equal(data.message.includes('teléfono'), false);

@@ -37,4 +37,10 @@ const audit = async ({ userId, notificationId, action, transaction, activityMode
 const markRead = async ({ id, userId, now = new Date(), db = sequelize, model = InternalNotification }) => db.transaction(async (transaction) => { const item = await model.findOne({ where: { id, usuario_id: userId }, transaction, lock: transaction.LOCK.UPDATE }); if (!item) throw fail('Notificación no encontrada.', 404); if (item.estado === 'NO_LEIDA') { await item.update({ estado: 'LEIDA', leida_en: now }, { transaction }); await audit({ userId, notificationId: item.id, action: 'LEER', transaction }); console.info('[Notifications] Notificación marcada como leída'); } return dto(item); });
 const markAllRead = async ({ userId, now = new Date(), db = sequelize, model = InternalNotification }) => db.transaction(async (transaction) => { const [count] = await model.update({ estado: 'LEIDA', leida_en: now }, { where: { usuario_id: userId, estado: 'NO_LEIDA' }, transaction }); if (count > 0) await audit({ userId, notificationId: null, action: 'LEER_TODAS', transaction }); console.info('[Notifications] Notificaciones marcadas como leídas'); return { actualizadas: count }; });
 
-module.exports = { dto, activeUserWhere, createOne, createForUsers, list, recent, summary, markRead, markAllRead };
+const markReferralNotificationsRead = async ({ referralId, transaction, now = new Date(), model = InternalNotification }) => {
+  const [count] = await model.update({ estado: 'LEIDA', leida_en: now }, { where: { derivacion_id: referralId, estado: 'NO_LEIDA' }, transaction });
+  if (count > 0) console.info('[Notifications] Notificaciones de derivación sincronizadas');
+  return count;
+};
+
+module.exports = { dto, activeUserWhere, createOne, createForUsers, list, recent, summary, markRead, markAllRead, markReferralNotificationsRead };

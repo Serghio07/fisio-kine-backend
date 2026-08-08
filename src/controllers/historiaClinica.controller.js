@@ -13,6 +13,7 @@ const {
 } = require('../models');
 const { randomUUID } = require('crypto');
 const { Op } = require('sequelize');
+const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
 
 const includeCompleto = [
   { model: Paciente, as: 'paciente' },
@@ -235,9 +236,10 @@ const crearHistoria = async (req, res, next) => {
     }
 
     const paciente = await Paciente.findByPk(body.paciente_id, { transaction });
-    if (!paciente) {
+    const pacienteError = clinicalPatientEligibilityError(paciente);
+    if (pacienteError) {
       await transaction.rollback();
-      return res.status(404).json({ message: 'Paciente no encontrado' });
+      return res.status(pacienteError.status).json({ message: pacienteError.message });
     }
 
     const historia = await HistoriaClinica.create(

@@ -133,7 +133,7 @@ const listarPacientes = async (req, res, next) => {
       const sexo = String(req.query.sexo || '').trim().toLocaleUpperCase('es-BO');
       const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
       const limit = Math.min(100, Math.max(10, Number.parseInt(req.query.limit, 10) || 25));
-      const where = {};
+      const where = { registro_pendiente: false };
 
       if (estado === 'active') where.estado = true;
       if (estado === 'inactive') where.estado = false;
@@ -163,8 +163,8 @@ const listarPacientes = async (req, res, next) => {
           limit,
           offset: (page - 1) * limit
         }),
-        Paciente.count({ where: { estado: true } }),
-        Paciente.count({ where: { estado: false } })
+        Paciente.count({ where: { estado: true, registro_pendiente: false } }),
+        Paciente.count({ where: { estado: false, registro_pendiente: false } })
       ]);
       return res.json({
         items: rows,
