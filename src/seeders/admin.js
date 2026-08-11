@@ -6,10 +6,6 @@ const crearAdmin = async () => {
   try {
     await sequelize.authenticate();
 
-    if (process.env.DB_SYNC === 'true') {
-      await sequelize.sync({ alter: true });
-    }
-
     const usuario = process.env.ADMIN_USER || 'admin';
     const password = process.env.ADMIN_PASSWORD;
     const debeResetear = process.argv.includes('--reset') || process.env.ADMIN_RESET_PASSWORD === 'true';

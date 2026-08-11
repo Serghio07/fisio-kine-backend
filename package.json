@@ -47,6 +47,9 @@
     "restore:db": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restore-database.ps1",
     "verify:db": "node src/scripts/verifyDatabase.js",
     "check:production-readiness": "node src/scripts/checkProductionReadiness.js",
+    "db:migrate:status": "sequelize-cli db:migrate:status",
+    "db:migrate": "sequelize-cli db:migrate",
+    "db:migrate:undo": "sequelize-cli db:migrate:undo",
     "backfill:cita-sesion-links": "node src/scripts/backfillAppointmentSessionLinks.js",
     "migrate:cita-sesion-links": "node src/scripts/migrateAppointmentSessionLinks.js",
     "migrate:pending-whatsapp-patients": "node src/scripts/migratePendingWhatsappPatients.js",
@@ -70,6 +73,7 @@
     "sequelize": "^6.37.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "nodemon": "^3.1.14",
+    "sequelize-cli": "6.6.3"
   }
 }
