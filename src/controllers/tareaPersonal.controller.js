@@ -36,6 +36,8 @@ const validar = (data) => {
 const listar = async (req, res, next) => {
   try {
     const where = {};
+    const usuario = req.user || req.usuario;
+    if (usuario.rol === 'personal') where.usuario_id = usuario.id;
     if (req.query.fecha) where.fecha = req.query.fecha;
     if (req.query.estado) where.estado = req.query.estado;
     const tareas = await TareaPersonal.findAll({ where, include, order: [['fecha', 'DESC'], ['hora', 'ASC'], ['id', 'DESC']] });

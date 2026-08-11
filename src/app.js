@@ -21,6 +21,8 @@ const documentoClinicoRoutes = require('./routes/documentoClinico.routes');
 const actividadRoutes = require('./routes/actividad.routes');
 const planillaPagosRoutes = require('./routes/planillaPagos.routes');
 const resumenDiarioRoutes = require('./routes/resumenDiario.routes');
+const googleCalendarRoutes = require('./routes/googleCalendar.routes');
+const assistantRoutes = require('./routes/assistant.routes');
 const registrarActividad = require('./middlewares/actividad.middleware');
 const blogRoutes = require('./routes/blog.routes');
 const blogCategoryRoutes = require('./routes/blogCategory.routes');
@@ -37,14 +39,17 @@ const { getAllowedOrigins } = require('./config/cors');
 
 const app = express();
 
+// La lista se carga al iniciar; reiniciar el backend después de cambiar CORS_ALLOWED_ORIGINS.
 const allowedOrigins = getAllowedOrigins();
 
 const corsOptions = {
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
 
-    console.error('Solicitud bloqueada por la política CORS');
-    return callback(new Error('Origen no permitido por CORS'));
+    console.warn(`[CORS] Solicitud bloqueada desde: ${String(origin).slice(0, 200)}`);
+    const error = new Error('Origen no permitido por CORS');
+    error.status = 403;
+    return callback(error);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -90,6 +95,9 @@ app.use('/api/documentos-clinicos', documentoClinicoRoutes);
 app.use('/api/actividades', actividadRoutes);
 app.use('/api/planilla-pagos', planillaPagosRoutes);
 app.use('/api/resumen-diario', resumenDiarioRoutes);
+app.use('/api/google-calendar', googleCalendarRoutes);
+app.use('/api/asistente', assistantRoutes);
+app.use('/api/assistant', assistantRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/blog-categories', blogCategoryRoutes);
 app.use('/api/public/blog', publicBlogRoutes);

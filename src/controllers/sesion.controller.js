@@ -26,6 +26,13 @@ const includeSesion = [
 ];
 
 const toMoney = (value) => Math.max(Number(value || 0), 0);
+const PROCEDIMIENTOS = [
+  'Fisioterapia', 'Kinesiología', 'Atención médica', 'Evaluación fisioterapéutica',
+  'Reevaluación', 'Terapia física', 'Rehabilitación', 'Masoterapia', 'Terapia manual',
+  'Ejercicio terapéutico', 'Electroterapia', 'Termoterapia', 'Crioterapia',
+  'Ultrasonoterapia', 'Hidroterapia', 'Curación', 'Aplicación de medicamentos',
+  'Control / seguimiento', 'Valoración médica', 'Procedimiento especial', 'Otro'
+];
 
 const calcularPago = (body) => {
   const estadoPago = body.estado_pago || 'Pendiente';
@@ -84,6 +91,8 @@ const normalizarSesion = (body) => {
     farmacos,
     observacion_pago: body.observacion_pago || null,
     motivo_sin_costo: body.estado_pago === 'Sin costo' ? body.motivo_sin_costo || null : null,
+    procedimiento: body.procedimiento || null,
+    procedimiento_otro: body.procedimiento === 'Otro' ? String(body.procedimiento_otro || '').trim() || null : null,
     medios_fisicos: body.medios_fisicos || null,
     tecnicas_manuales: body.tecnicas_manuales || null,
     descripcion_tratamiento: body.descripcion_tratamiento || null,
@@ -117,6 +126,8 @@ const validarSesion = (body) => {
   if (body.dolor_antes !== null && body.dolor_antes !== '' && (Number(body.dolor_antes) < 0 || Number(body.dolor_antes) > 10)) return 'dolor_antes debe estar entre 0 y 10';
   if (body.dolor_despues !== null && body.dolor_despues !== '' && (Number(body.dolor_despues) < 0 || Number(body.dolor_despues) > 10)) return 'dolor_despues debe estar entre 0 y 10';
   if (body.asistencia === 'asistio') {
+    if (!PROCEDIMIENTOS.includes(body.procedimiento)) return 'Seleccione un procedimiento válido';
+    if (body.procedimiento === 'Otro' && !String(body.procedimiento_otro || '').trim()) return 'Especifique el procedimiento realizado';
     if (body.dolor_despues === null || body.dolor_despues === '') return 'dolor_despues es requerido cuando el paciente asistió';
     if (!String(body.descripcion_tratamiento || '').trim()) return 'El procedimiento realizado es requerido cuando el paciente asistió';
   }

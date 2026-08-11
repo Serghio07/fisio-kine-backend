@@ -110,6 +110,47 @@ const listarProfesionalesActivos = async (req, res, next) => {
   }
 };
 
+const obtenerPerfil = async (req, res, next) => {
+  try {
+    const usuario = await Usuario.findByPk(req.user.id, {
+      attributes: atributosPublicos,
+      include: includeFichaPersonal
+    });
+    if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado' });
+    return res.json(usuario);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const actualizarPerfil = async (req, res, next) => {
+  try {
+    const usuario = await Usuario.findByPk(req.user.id);
+    if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado' });
+
+    const nombre = limpiarTexto(req.body.nombre);
+    const email = limpiarTexto(req.body.email) || null;
+    const telefono = limpiarTexto(req.body.telefono) || null;
+    const foto = req.body.foto || null;
+
+    if (!nombre) return res.status(400).json({ message: 'El nombre es obligatorio.' });
+    const errorImagen = validarImagen(foto);
+    if (errorImagen) return res.status(400).json({ message: errorImagen });
+    if (email && await Usuario.findOne({ where: { email, id: { [Op.ne]: usuario.id } } })) {
+      return res.status(409).json({ message: 'El email ya esta registrado' });
+    }
+
+    await usuario.update({ nombre, email, telefono, foto });
+    const actualizado = await Usuario.findByPk(usuario.id, {
+      attributes: atributosPublicos,
+      include: includeFichaPersonal
+    });
+    return res.json({ message: 'Perfil actualizado correctamente.', usuario: actualizado });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const crearUsuarioAnterior = async (req, res, next) => {
   try {
     const nombre = limpiarTexto(req.body.nombre);
@@ -465,6 +506,8 @@ const actualizarUsuario = async (req, res, next) => {
 module.exports = {
   listarUsuarios,
   listarProfesionalesActivos,
+  obtenerPerfil,
+  actualizarPerfil,
   obtenerUsuario,
   crearUsuario,
   actualizarUsuario,

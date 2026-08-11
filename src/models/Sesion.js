@@ -72,6 +72,8 @@ const Sesion = sequelize.define(
     farmacos: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
     observacion_pago: DataTypes.TEXT,
     motivo_sin_costo: DataTypes.TEXT,
+    procedimiento: DataTypes.STRING(80),
+    procedimiento_otro: DataTypes.STRING(180),
     medios_fisicos: DataTypes.TEXT,
     tecnicas_manuales: DataTypes.TEXT,
     descripcion_tratamiento: DataTypes.TEXT,

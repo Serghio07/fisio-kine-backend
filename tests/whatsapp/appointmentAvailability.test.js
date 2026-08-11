@@ -74,11 +74,40 @@ test('estados bloqueantes son una fuente central estricta', () => {
 test('validarSolapamiento reutiliza estados centrales', async () => {
   const original = Cita.findOne; const whereSeen = [];
   Cita.findOne = async ({ where }) => { whereSeen.push(where); return null; };
+  const dependencies = { getActiveCenterCapacity: async () => 2, getBlockingAppointments: async () => [] };
   try {
-    assert.equal(await validarSolapamiento({ fecha: '2026-08-05', hora_inicio: '09:00', hora_fin: '10:30', estado: 'Reprogramada' }), null);
+    assert.equal(await validarSolapamiento({ fecha: '2026-08-05', hora_inicio: '09:00', hora_fin: '10:30', estado: 'Reprogramada' }, null, dependencies), null);
     assert.equal(whereSeen.length, 0);
-    await validarSolapamiento({ fecha: '2026-08-05', hora_inicio: '09:00', hora_fin: '10:30', estado: 'Programada' });
-    assert.equal(whereSeen.length, 1);
+    await validarSolapamiento({ paciente_id: 5, fecha: '2026-08-05', hora_inicio: '09:00', hora_fin: '10:30', estado: 'Programada' }, null, dependencies);
+    assert.equal(whereSeen.length, 1); assert.equal(whereSeen[0].paciente_id, 5);
+  } finally { Cita.findOne = original; }
+});
+
+test('agenda manual permite varios pacientes y bloquea al alcanzar capacidad', async () => {
+  const original = Cita.findOne;
+  Cita.findOne = async () => null;
+  const payload = { paciente_id: 8, fecha: '2026-08-05', hora_inicio: '09:00', hora_fin: '10:30', estado: 'Programada' };
+  try {
+    const oneExisting = [{ hora_inicio: '09:00', hora_fin: '10:30' }];
+    assert.equal(await validarSolapamiento(payload, null, {
+      getActiveCenterCapacity: async () => 2,
+      getBlockingAppointments: async () => oneExisting
+    }), null);
+    assert.match(await validarSolapamiento(payload, null, {
+      getActiveCenterCapacity: async () => 2,
+      getBlockingAppointments: async () => [...oneExisting, { hora_inicio: '09:30', hora_fin: '10:00' }]
+    }), /capacidad máxima/u);
+  } finally { Cita.findOne = original; }
+});
+
+test('agenda manual impide dos citas simultáneas del mismo paciente', async () => {
+  const original = Cita.findOne;
+  Cita.findOne = async () => ({ id: 99 });
+  try {
+    assert.match(await validarSolapamiento({ paciente_id: 8, fecha: '2026-08-05', hora_inicio: '09:00', hora_fin: '10:30', estado: 'Programada' }, null, {
+      getActiveCenterCapacity: async () => 3,
+      getBlockingAppointments: async () => []
+    }), /paciente ya tiene/u);
   } finally { Cita.findOne = original; }
 });
 
@@ -88,14 +117,14 @@ test('capacidad cuenta usuarios distintos activos', async () => {
   assert.equal(count, 3); assert.equal(options.distinct, true); assert.equal(options.col, 'usuario_id'); assert.equal(options.include[0].required, true);
 });
 
-test('cualquier cita activa cruzada bloquea aunque exista capacidad general', async () => {
+test('permite citas simultaneas hasta completar la capacidad general', async () => {
   const personalModel = { count: async () => 3 };
   const appointmentModel = { findAll: async () => [
     { hora_inicio: '15:00', hora_fin: '16:30', profesional_id: null },
     { hora_inicio: '15:00', hora_fin: '16:30' }
   ] };
   const result = await getAvailableSlots({ date: '2026-08-05', preferredShift: 'TARDE', durationMinutes: 90, intervalMinutes: 30, maxSlots: 5, now: new Date('2026-08-04T12:00:00Z'), personalModel, userModel: {}, appointmentModel });
-  assert.equal(result.slots.length, 5); assert.notEqual(result.slots[0].start, '15:00');
+  assert.equal(result.slots.length, 5); assert.equal(result.slots[0].start, '15:00');
   appointmentModel.findAll = async () => Array(3).fill({ hora_inicio: '15:00', hora_fin: '16:30', profesional_id: null });
   const full = await getAvailableSlots({ date: '2026-08-05', preferredTime: '15:00', durationMinutes: 90, intervalMinutes: 30, maxSlots: 5, now: new Date('2026-08-04T12:00:00Z'), personalModel, userModel: {}, appointmentModel });
   assert.notEqual(full.slots[0].start, '15:00');
@@ -124,7 +153,7 @@ test('sábado con cita 09:00 a 10:00 excluye solamente candidatos cruzados', asy
     now: new Date('2026-08-04T12:00:00Z'), personalModel: { count: async () => 3 }, userModel: {},
     appointmentModel: { findAll: async () => [{ hora_inicio: '09:00', hora_fin: '10:00' }] }
   });
-  assert.deepEqual(result.slots.map((slot) => slot.start), ['10:00', '10:30', '11:00']);
+  assert.deepEqual(result.slots.map((slot) => slot.start), ['09:00', '09:30', '10:00', '10:30', '11:00']);
 });
 
 test('revalidacion y siguiente fecha respetan capacidad', async () => {

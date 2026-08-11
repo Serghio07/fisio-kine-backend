@@ -4,6 +4,8 @@ const autorizarRoles = require('../middlewares/role.middleware');
 const {
   listarUsuarios,
   listarProfesionalesActivos,
+  obtenerPerfil,
+  actualizarPerfil,
   obtenerUsuario,
   crearUsuario,
   actualizarUsuario,
@@ -15,6 +17,8 @@ const {
 router.use(autenticar);
 
 router.get('/profesionales/activos', listarProfesionalesActivos);
+router.get('/me', obtenerPerfil);
+router.put('/me', actualizarPerfil);
 
 router.use(autorizarRoles('admin'));
 

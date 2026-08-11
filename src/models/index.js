@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const GoogleCalendarIntegracion = require('./GoogleCalendarIntegracion');
 const Usuario = require('./Usuario');
 const Paciente = require('./Paciente');
 const HistoriaClinica = require('./HistoriaClinica');
@@ -241,6 +242,7 @@ BlogTag.belongsToMany(BlogPost, { through: BlogPostTag, foreignKey: 'blog_tag_id
 
 module.exports = {
   sequelize,
+  GoogleCalendarIntegracion,
   Usuario,
   Paciente,
   HistoriaClinica,

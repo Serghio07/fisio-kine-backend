@@ -2,10 +2,18 @@ const { Op } = require('sequelize');
 const { Cita, ESTADOS_CITA, EvaluacionFinal, HistoriaClinica, Paciente, Personal, Sesion, TIPOS_ATENCION, Usuario, sequelize } = require('../models');
 const { boliviaDate } = require('../utils/boliviaDateTime');
 const { actualizarCitasNoAsistidas } = require('../services/citaEstado.service');
-const { BLOCKING_APPOINTMENT_STATUSES } = require('../services/appointmentAvailability.service');
+const {
+  BLOCKING_APPOINTMENT_STATUSES,
+  getActiveCenterCapacity,
+  getBlockingAppointments,
+  isSlotOverlapping,
+  toMinutes,
+  toTime
+} = require('../services/appointmentAvailability.service');
 const { ensureNoShowSession } = require('../services/citaSesionLink.service');
 const { cleanupTemporaryWhatsappNoShow } = require('../services/temporaryWhatsappPatientCleanup.service');
 const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
+const { deleteAppointmentEvent, syncAppointment } = require('../services/googleCalendarSync.service');
 
 const includeCita = [
   { model: Paciente, as: 'paciente' },
@@ -71,23 +79,12 @@ const validarCita = (body) => {
   return null;
 };
 
-const validarSolapamiento = async (payload, citaId = null) => {
+const validarSolapamiento = async (payload, citaId = null, dependencies = {}) => {
   if (!BLOCKING_APPOINTMENT_STATUSES.includes(payload.estado)) return null;
 
   const inicio = payload.hora_inicio;
-  if (!payload.hora_fin) {
-    const where = {
-      fecha: payload.fecha,
-      hora_inicio: inicio,
-      estado: { [Op.in]: BLOCKING_APPOINTMENT_STATUSES }
-    };
-    if (citaId) where.id = { [Op.ne]: citaId };
-    const citaExistente = await Cita.findOne({ where });
-    return citaExistente ? 'Ya existe una cita activa en ese horario' : null;
-  }
-
-  const fin = payload.hora_fin;
-  const where = {
+  const fin = payload.hora_fin || toTime(toMinutes(inicio) + 1);
+  const overlap = {
     fecha: payload.fecha,
     estado: { [Op.in]: BLOCKING_APPOINTMENT_STATUSES },
     [Op.and]: [
@@ -95,14 +92,20 @@ const validarSolapamiento = async (payload, citaId = null) => {
       { [Op.or]: [{ hora_fin: { [Op.gt]: inicio } }, { hora_fin: null, hora_inicio: { [Op.gte]: inicio, [Op.lt]: fin } }] }
     ]
   };
-  if (payload.profesional_id && payload.paciente_id) {
-    where[Op.or] = [{ profesional_id: payload.profesional_id }, { paciente_id: payload.paciente_id }];
+  if (citaId) overlap.id = { [Op.ne]: citaId };
+
+  if (payload.paciente_id) {
+    const citaPaciente = await Cita.findOne({ where: { ...overlap, paciente_id: payload.paciente_id } });
+    if (citaPaciente) return 'El paciente ya tiene una cita activa en ese rango de horario';
   }
 
-  if (citaId) where.id = { [Op.ne]: citaId };
-
-  const citaExistente = await Cita.findOne({ where });
-  return citaExistente ? 'Ya existe una cita activa en ese rango de horario' : null;
+  const getCapacity = dependencies.getActiveCenterCapacity || getActiveCenterCapacity;
+  const getAppointments = dependencies.getBlockingAppointments || getBlockingAppointments;
+  const capacity = await getCapacity();
+  if (capacity <= 0) return 'No existe capacidad activa configurada para atender citas';
+  const appointments = await getAppointments({ date: payload.fecha, excludeAppointmentId: citaId });
+  const simultaneous = appointments.filter((item) => isSlotOverlapping({ start: inicio, end: fin }, item)).length;
+  return simultaneous >= capacity ? 'Se alcanzó la capacidad máxima de atención en ese rango de horario' : null;
 };
 
 const resumenProgramacion = async (historiaId, transaction) => {
@@ -158,6 +161,7 @@ const validarDisponibilidad = async (req, res, next) => {
 
 const crearProgramacion = async (req, res, next) => {
   const transaction = await sequelize.transaction();
+  const citasCreadas = [];
   try {
     const historia = await HistoriaClinica.findByPk(req.params.id, {
       transaction,
@@ -188,7 +192,7 @@ const crearProgramacion = async (req, res, next) => {
       if (duplicada) throw Object.assign(new Error(`La sesion ${numero} ya esta programada`), { status: 409 });
     }
     for (const item of items) {
-      await Cita.create({
+      const citaCreada = await Cita.create({
         paciente_id: historia.paciente_id, historia_clinica_id: historia.id,
         profesional_id: item.profesional_id || req.usuario.id, usuario_id: req.usuario.id,
         numero_sesion: Number(item.numero_sesion), total_sesiones: indicadas,
@@ -197,8 +201,13 @@ const crearProgramacion = async (req, res, next) => {
         tipo_atencion: 'Sesion de tratamiento', motivo: `Sesion ${item.numero_sesion} de ${indicadas}`,
         estado: 'Programada', origen: 'Plan de tratamiento', observacion: item.observacion
       }, { transaction });
+      citasCreadas.push(citaCreada.id);
     }
     await transaction.commit();
+    for (const citaId of citasCreadas) {
+      const citaCreada = await Cita.findByPk(citaId, { include: includeCita });
+      await syncAppointment(citaCreada);
+    }
     return res.status(201).json(await resumenProgramacion(historia.id));
   } catch (error) {
     await transaction.rollback();
@@ -269,6 +278,7 @@ const crearCita = async (req, res, next) => {
       profesional_id: req.user.id
     });
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
+    await syncAppointment(citaCompleta);
     return res.status(201).json(citaCompleta);
   } catch (error) {
     return next(error);
@@ -299,6 +309,7 @@ const actualizarCita = async (req, res, next) => {
     } else if (payload.estado === 'Falto') await ensureNoShowSession(cita, { transaction });
     await transaction.commit();
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
+    await syncAppointment(citaCompleta);
     return res.json(citaCompleta);
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
@@ -311,7 +322,9 @@ const eliminarCita = async (req, res, next) => {
     const cita = await Cita.findByPk(req.params.id);
     if (!cita) return res.status(404).json({ message: 'Cita no encontrada' });
 
+    const googleEventId = cita.google_event_id;
     await cita.destroy();
+    await deleteAppointmentEvent(googleEventId);
     return res.json({ message: 'Cita eliminada correctamente' });
   } catch (error) {
     return next(error);
@@ -332,6 +345,7 @@ const cambiarEstadoCita = async (req, res, next) => {
     } else if (req.body.estado === 'Falto') await ensureNoShowSession(cita, { transaction });
     await transaction.commit();
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
+    await syncAppointment(citaCompleta);
     return res.json(citaCompleta);
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();

@@ -73,7 +73,7 @@ const getAvailableSlots = async (options) => {
   const appointments = await getBlockingAppointments(options);
   const candidates = generateCandidateSlots({ date: options.date, durationMinutes, intervalMinutes, now: options.now });
   console.info('[WhatsApp] Horarios candidatos generados');
-  let available = candidates.filter((slot) => !appointments.some((item) => isSlotOverlapping(slot, item)));
+  let available = candidates.filter((slot) => appointments.filter((item) => isSlotOverlapping(slot, item)).length < capacity);
   if (options.strictShift && options.preferredShift) available = available.filter((slot) => slot.shift === options.preferredShift);
   const slots = prioritizeSlots(available, options.preferredShift, options.preferredTime).slice(0, maxSlots).map((slot, index) => ({ option: index + 1, ...slot }));
   console.info('[WhatsApp] Horarios disponibles generados');
@@ -85,7 +85,7 @@ const revalidateSlotCapacity = async (options) => {
   if (capacity <= 0) return false;
   const appointments = await getBlockingAppointments({ ...options, date: options.slot.date });
   console.info('[WhatsApp] Capacidad revalidada');
-  return !appointments.some((item) => isSlotOverlapping(options.slot, item));
+  return appointments.filter((item) => isSlotOverlapping(options.slot, item)).length < capacity;
 };
 
 const findAvailableDates = async (options = {}) => {

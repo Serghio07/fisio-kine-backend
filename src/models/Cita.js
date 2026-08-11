@@ -34,8 +34,8 @@ const Cita = sequelize.define(
         isIn: [ESTADOS_CITA]
       }
     },
-    observacion: DataTypes.TEXT
-    ,
+    observacion: DataTypes.TEXT,
+    google_event_id: { type: DataTypes.STRING(255), allowNull: true },
     origen: { type: DataTypes.STRING(80), allowNull: false, defaultValue: 'Agenda manual' },
     fecha_programada_original: DataTypes.DATEONLY,
     hora_inicio_original: DataTypes.TIME,
@@ -47,6 +47,13 @@ const Cita = sequelize.define(
     tableName: 'citas'
   }
 );
+
+const citaToJSON = Cita.prototype.toJSON;
+Cita.prototype.toJSON = function toJSON() {
+  const value = citaToJSON.call(this);
+  delete value.google_event_id;
+  return value;
+};
 
 module.exports = {
   Cita,
