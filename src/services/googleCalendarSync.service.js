@@ -56,4 +56,13 @@ const deleteAppointmentEvent = async (eventId) => {
   }
 };
 
-module.exports = { eventBody, syncAppointment, deleteAppointmentEvent };
+const syncAppointmentById = async (appointmentId) => {
+  if (!appointmentId) return;
+  const { Cita, Paciente } = require('../models');
+  const cita = await Cita.findByPk(appointmentId, {
+    include: [{ model: Paciente, as: 'paciente' }]
+  });
+  if (cita) await syncAppointment(cita);
+};
+
+module.exports = { eventBody, syncAppointment, syncAppointmentById, deleteAppointmentEvent };

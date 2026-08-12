@@ -240,3 +240,19 @@ test('confirmar solicitud inicia disponibilidad sobre la misma solicitud', async
   assert.equal(active.paso_actual, CONVERSATION_STEPS.WAITING_SLOT_SELECTION);
   assert.equal(request.paso_actual, CONVERSATION_STEPS.WAITING_SLOT_SELECTION);
 });
+
+test('sincroniza con Google despues de confirmar la transaccion y oculta el dato interno', async () => {
+  const calls = [];
+  const result = await processConversationMessage({ phone: '59160000000', message: '1', isText: true }, {
+    sequelize: {
+      transaction: async () => {
+        calls.push('commit');
+        return { responseText: 'Cita registrada', responseKind: 'APPOINTMENT_CREATED', syncAppointmentId: 91 };
+      }
+    },
+    syncAppointmentById: async (id) => calls.push(`google:${id}`)
+  });
+  assert.deepEqual(calls, ['commit', 'google:91']);
+  assert.equal(result.syncAppointmentId, undefined);
+  assert.equal(result.responseKind, 'APPOINTMENT_CREATED');
+});

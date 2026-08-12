@@ -16,6 +16,7 @@ const { confirmationSteps, processFinalConfirmation, ERROR_MESSAGE: FINAL_CONFIR
 const { managementSteps, processManagementStep, help: managementHelp, QUERY_ERROR: MANAGEMENT_QUERY_ERROR, UPDATE_ERROR: MANAGEMENT_ERROR } = require('./whatsappAppointmentManagement.service');
 const { reminderSteps, processReminderResponse, help: reminderHelp } = require('./whatsappReminderResponse.service');
 const { createOrReuseReceptionReferral } = require('./whatsappReceptionReferral.service');
+const { syncAppointmentById } = require('./googleCalendarSync.service');
 
 const NEW_CONTACT_MENU = `¡Hola! 👋
 Bienvenido a Physio Active.
@@ -176,7 +177,7 @@ const processConversationMessage = async (input, dependencies = {}) => {
   const now = dependencies.now ? new Date(dependencies.now) : new Date();
 
   try {
-    return await db.transaction(async (transaction) => {
+    const result = await db.transaction(async (transaction) => {
     if (dependencies.useAdvisoryLock !== false) {
       await db.query('SELECT pg_advisory_xact_lock(hashtext(:phone))', { replacements: { phone }, transaction });
     }
@@ -368,6 +369,14 @@ const processConversationMessage = async (input, dependencies = {}) => {
     await conversation.update(activity(now, timeout), { transaction });
     return { responseText: RESPONSES.CONTINUATION, responseKind: 'FLOW_PENDING', contactType: conversation.tipo_contacto, conversationStep: conversation.paso_actual };
     });
+    const appointmentId = result?.syncAppointmentId;
+    if (appointmentId) {
+      const synchronize = dependencies.syncAppointmentById || syncAppointmentById;
+      try { await synchronize(appointmentId); }
+      catch { console.error('[Google Calendar] No se pudo sincronizar la cita confirmada por WhatsApp'); }
+      delete result.syncAppointmentId;
+    }
+    return result;
   } catch (error) {
     if (error?.code === 'APPOINTMENT_REQUEST_CREATE_FAILED') {
       return { responseText: REQUEST_MESSAGES.CREATE_ERROR, responseKind: 'REQUEST_CREATE_ERROR' };

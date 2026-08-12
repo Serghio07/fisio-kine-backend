@@ -90,7 +90,7 @@ const processFinalConfirmation = async ({ conversation, message, requestModel, a
     await conversation.update({ paciente_id: temporaryPatient.id, paso_actual: CONVERSATION_STEPS.APPOINTMENT_CREATED, ...activity }, { transaction });
     console.info('[WhatsApp] Paciente temporal y cita creados');
     const name = firstNameFor(conversation, request);
-    return { responseText: `¡Listo${name ? `, ${name}` : ''}! ✅\n\nTu horario quedó reservado para:\n\n📅 ${humanDate(request.fecha_solicitada)}\n🕘 ${String(request.hora_inicio).slice(0, 5)} a ${String(request.hora_fin).slice(0, 5)}\n\nTe enviaremos un recordatorio. Cuando asistas, recepción completará tus datos.`, responseKind: referral.created ? 'TEMPORARY_APPOINTMENT_CREATED' : 'TEMPORARY_APPOINTMENT_REUSED', conversationStep: CONVERSATION_STEPS.APPOINTMENT_CREATED };
+    return { responseText: `¡Listo${name ? `, ${name}` : ''}! ✅\n\nTu horario quedó reservado para:\n\n📅 ${humanDate(request.fecha_solicitada)}\n🕘 ${String(request.hora_inicio).slice(0, 5)} a ${String(request.hora_fin).slice(0, 5)}\n\nTe enviaremos un recordatorio. Cuando asistas, recepción completará tus datos.`, responseKind: referral.created ? 'TEMPORARY_APPOINTMENT_CREATED' : 'TEMPORARY_APPOINTMENT_REUSED', conversationStep: CONVERSATION_STEPS.APPOINTMENT_CREATED, syncAppointmentId: appointment.id };
   }
 
   const patient = await patientModel.findByPk(request.paciente_id, { transaction, lock: transaction.LOCK?.UPDATE });
@@ -117,7 +117,7 @@ const processFinalConfirmation = async ({ conversation, message, requestModel, a
   }
   console.info('[WhatsApp] Solicitud vinculada con cita');
   const name = firstNameFor(conversation, request);
-  return { responseText: `¡Listo${name ? `, ${name}` : ''}! ✅\n\nTu cita fue registrada para:\n\n📅 ${humanDate(request.fecha_solicitada)}\n🕘 ${String(request.hora_inicio).slice(0, 5)} a ${String(request.hora_fin).slice(0, 5)}\n\nEl centro asignará al profesional.\n\nEscribe MENÚ cuando necesites otra opción.`, responseKind: 'APPOINTMENT_CREATED', conversationStep: CONVERSATION_STEPS.APPOINTMENT_CREATED };
+  return { responseText: `¡Listo${name ? `, ${name}` : ''}! ✅\n\nTu cita fue registrada para:\n\n📅 ${humanDate(request.fecha_solicitada)}\n🕘 ${String(request.hora_inicio).slice(0, 5)} a ${String(request.hora_fin).slice(0, 5)}\n\nEl centro asignará al profesional.\n\nEscribe MENÚ cuando necesites otra opción.`, responseKind: 'APPOINTMENT_CREATED', conversationStep: CONVERSATION_STEPS.APPOINTMENT_CREATED, syncAppointmentId: appointment.id };
 };
 
 module.exports = { confirmationSteps, finalSummary, requestReady, selectedSlotConsistent, validBusinessRange, processFinalConfirmation, ERROR_MESSAGE };

@@ -15,6 +15,7 @@ const { validarImagen } = require('../utils/imagen');
 const { boliviaDate } = require('../utils/boliviaDateTime');
 const { normalizePhoneNumber } = require('../utils/phone');
 const appointmentAvailability = require('../services/appointmentAvailability.service');
+const { syncAppointmentById } = require('../services/googleCalendarSync.service');
 
 const PHONE_DUPLICATE_MESSAGE = 'Ya existe un paciente registrado con este número de teléfono.';
 const PHONE_INVALID_MESSAGE = 'El número de teléfono no es válido.';
@@ -368,7 +369,7 @@ const crearPaciente = async (req, res, next) => {
       const paciente = await Paciente.create({ ...data, estado: true });
       return res.status(201).json(paciente);
     }
-    const paciente = await Paciente.sequelize.transaction(async (transaction) => {
+    const result = await Paciente.sequelize.transaction(async (transaction) => {
       const referral = await WhatsappReceptionReferral.findByPk(referralId, { include: [{ model: WhatsappSolicitudCita, as: 'solicitud', required: true }], transaction, lock: transaction.LOCK.UPDATE });
       if (!referral || referral.tipo_derivacion !== 'REGISTRO_PACIENTE' || !['PENDIENTE', 'EN_ATENCION'].includes(referral.estado)) throw Object.assign(new Error('La solicitud pendiente ya no está disponible.'), { status: 409 });
       if (normalizePhoneNumber(referral.telefono_normalizado) !== data.telefono_normalizado) throw Object.assign(new Error('El teléfono debe coincidir con la solicitud de WhatsApp.'), { status: 400 });
@@ -385,9 +386,10 @@ const crearPaciente = async (req, res, next) => {
       }
       await request.update({ paciente_id: created.id, cita_id: appointment?.id || request.cita_id, estado: appointment ? 'CONFIRMADA' : request.estado, paso_actual: appointment ? 'CITA_CREADA' : request.paso_actual }, { transaction });
       await referral.update({ paciente_id: created.id, cita_id: appointment?.id || referral.cita_id, estado: 'RESUELTA', resolucion: 'Paciente registrado desde solicitud de WhatsApp', resuelta_en: new Date() }, { transaction });
-      return created;
+      return { paciente: created, appointmentId: appointment?.id || null };
     });
-    return res.status(201).json(paciente);
+    if (result.appointmentId) await syncAppointmentById(result.appointmentId);
+    return res.status(201).json(result.paciente);
   } catch (error) {
     if (error.status) return res.status(error.status).json({ message: error.message });
     if (isPhoneUniqueConstraintError(error)) return res.status(409).json({ message: PHONE_DUPLICATE_MESSAGE });

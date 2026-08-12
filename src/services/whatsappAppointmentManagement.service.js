@@ -170,7 +170,7 @@ const processManagementStep = async ({ conversation, message, appointmentModel =
       await conversation.update({ paso_actual: CONVERSATION_STEPS.APPOINTMENT_CANCELLED, contexto: baseContext(conversation), ...activity }, { transaction });
     } catch (cause) { const error = new Error('No fue posible cancelar la cita'); error.code = 'WHATSAPP_APPOINTMENT_MANAGEMENT_FAILED'; error.cause = cause; throw error; }
     console.info('[WhatsApp] Cita cancelada');
-    return { responseText: `Tu cita fue cancelada correctamente.\n\nEsperamos poder atenderte en otra ocasión 😊\n\nEscribe MENÚ para volver.`, responseKind: 'APPOINTMENT_CANCELLED', conversationStep: CONVERSATION_STEPS.APPOINTMENT_CANCELLED };
+    return { responseText: `Tu cita fue cancelada correctamente.\n\nEsperamos poder atenderte en otra ocasión 😊\n\nEscribe MENÚ para volver.`, responseKind: 'APPOINTMENT_CANCELLED', conversationStep: CONVERSATION_STEPS.APPOINTMENT_CANCELLED, syncAppointmentId: appointment.id };
   }
 
   if (step === CONVERSATION_STEPS.WAITING_RESCHEDULE_DATE) {
@@ -214,7 +214,7 @@ const processManagementStep = async ({ conversation, message, appointmentModel =
       await conversation.update({ paso_actual: CONVERSATION_STEPS.APPOINTMENT_RESCHEDULED, contexto: baseContext(conversation), ...activity }, { transaction });
     } catch (cause) { const error = new Error('No fue posible reprogramar la cita'); error.code = 'WHATSAPP_APPOINTMENT_MANAGEMENT_FAILED'; error.cause = cause; throw error; }
     console.info('[WhatsApp] Cita reprogramada');
-    return { responseText: `¡Listo! ✅\n\nTu cita fue reprogramada para:\n\n📅 ${humanDate(management.candidate_slot.date)}\n🕘 ${management.candidate_slot.start} a ${management.candidate_slot.end}\n\nEscribe MENÚ cuando necesites otra opción.`, responseKind: 'APPOINTMENT_RESCHEDULED', conversationStep: CONVERSATION_STEPS.APPOINTMENT_RESCHEDULED };
+    return { responseText: `¡Listo! ✅\n\nTu cita fue reprogramada para:\n\n📅 ${humanDate(management.candidate_slot.date)}\n🕘 ${management.candidate_slot.start} a ${management.candidate_slot.end}\n\nEscribe MENÚ cuando necesites otra opción.`, responseKind: 'APPOINTMENT_RESCHEDULED', conversationStep: CONVERSATION_STEPS.APPOINTMENT_RESCHEDULED, syncAppointmentId: appointment.id };
   }
   return { responseText: 'La operación ya finalizó. Escribe MENÚ para realizar otra operación.', responseKind: 'MANAGEMENT_FINISHED', conversationStep: step };
 };
