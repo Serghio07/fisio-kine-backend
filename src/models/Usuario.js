@@ -39,7 +39,9 @@ const Usuario = sequelize.define(
       }
     },
     bloqueado_hasta: DataTypes.DATE,
-    ultimo_acceso: DataTypes.DATE
+    ultimo_acceso: DataTypes.DATE,
+    reset_password_token_hash: { type: DataTypes.STRING(64), allowNull: true },
+    reset_password_expires_at: { type: DataTypes.DATE, allowNull: true }
   },
   {
     tableName: 'usuarios',
@@ -63,6 +65,8 @@ Usuario.prototype.validarPassword = function validarPassword(password) {
 Usuario.prototype.toJSON = function toJSON() {
   const values = { ...this.get() };
   delete values.password;
+  delete values.reset_password_token_hash;
+  delete values.reset_password_expires_at;
   return values;
 };
 

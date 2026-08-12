@@ -4,6 +4,7 @@ const { GoogleCalendarIntegracion } = require('../models');
 
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 const DEFAULT_CALENDAR_ID = 'primary';
+const GOOGLE_STATUS_TIMEOUT_MS = 10000;
 const required = (name) => { const value = process.env[name]; if (!value) throw new Error(`Falta configurar ${name}`); return value; };
 const oauthClient = () => new google.auth.OAuth2(required('GOOGLE_CLIENT_ID'), required('GOOGLE_CLIENT_SECRET'), required('GOOGLE_REDIRECT_URI'));
 const encryptionKey = () => crypto.createHash('sha256').update(required('GOOGLE_TOKEN_ENCRYPTION_KEY')).digest();
@@ -49,9 +50,47 @@ const calendarCall = async (method, params) => {
   return google.calendar({ version: 'v3', auth: authorization.client }).events[method]({ calendarId: authorization.calendarId, ...params });
 };
 
+const getConnectionStatus = async () => {
+  const stored = await GoogleCalendarIntegracion.findByPk(1);
+  if (!stored?.refresh_token_cifrado) return { connected: false };
+  try {
+    const authorization = await getAuthorizedClient();
+    await google.calendar({ version: 'v3', auth: authorization.client }).events.list({
+      calendarId: authorization.calendarId,
+      maxResults: 1,
+      singleEvents: false,
+      timeout: GOOGLE_STATUS_TIMEOUT_MS
+    });
+    return { connected: true, calendarId: authorization.calendarId, connectedAt: stored.created_at || null };
+  } catch {
+    console.error('[Google Calendar] No se pudo verificar la conexion almacenada');
+    return { connected: false, reason: 'AUTHORIZATION_INVALID' };
+  }
+};
+
+const disconnect = async () => {
+  const stored = await GoogleCalendarIntegracion.findByPk(1);
+  if (!stored) return { disconnected: true, revocation: 'NOT_REQUIRED' };
+  let revocation = 'NOT_ATTEMPTED';
+  try {
+    const refreshToken = decrypt(stored.refresh_token_cifrado);
+    if (refreshToken) {
+      await oauthClient().revokeToken(refreshToken);
+      revocation = 'REVOKED';
+    }
+  } catch {
+    revocation = 'FAILED';
+    console.error('[Google Calendar] Google no pudo confirmar la revocacion; se eliminaran las credenciales locales');
+  }
+  await stored.destroy();
+  return { disconnected: true, revocation };
+};
+
 module.exports = {
   SCOPE, generateAuthUrl, exchangeCodeForTokens, saveTokens,
-  isConnected: async () => Boolean((await GoogleCalendarIntegracion.findByPk(1))?.refresh_token_cifrado),
+  isConnected: async () => (await getConnectionStatus()).connected,
+  getConnectionStatus,
+  disconnect,
   createEvent: (requestBody) => calendarCall('insert', { requestBody }),
   updateEvent: (eventId, requestBody) => calendarCall('patch', { eventId, requestBody }),
   deleteEvent: (eventId) => calendarCall('delete', { eventId })

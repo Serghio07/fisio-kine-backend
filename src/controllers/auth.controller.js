@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const { Usuario, Personal } = require('../models');
 const { validarImagen } = require('../utils/imagen');
 const { validarPasswordSegura } = require('../utils/password');
+const passwordResetService = require('../services/passwordReset.service');
 
 const MAX_INTENTOS_LOGIN = 5;
 const MINUTOS_BLOQUEO = 15;
@@ -160,4 +161,33 @@ const logout = (req, res) => {
   return res.json({ message: 'Sesión cerrada correctamente.' });
 };
 
-module.exports = { login, logout, solicitarAcceso };
+const FORGOT_PASSWORD_MESSAGE = 'Si el correo esta registrado, recibiras instrucciones para restablecer tu contrasena.';
+
+const forgotPassword = async (req, res) => {
+  try {
+    await passwordResetService.requestPasswordReset(req.body.email);
+  } catch {
+    console.error('[Auth] No se pudo procesar el correo de recuperacion de contrasena');
+  }
+  return res.json({ message: FORGOT_PASSWORD_MESSAGE });
+};
+
+const resetPassword = async (req, res, next) => {
+  try {
+    const token = String(req.body.token || '').trim();
+    const { newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ message: 'El token y la nueva contrasena son obligatorios.' });
+    }
+    const errorPassword = validarPasswordSegura(newPassword);
+    if (errorPassword) return res.status(400).json({ message: errorPassword });
+
+    const updated = await passwordResetService.resetPassword(token, newPassword);
+    if (!updated) return res.status(400).json({ message: 'El enlace es invalido o ha expirado.' });
+    return res.json({ message: 'Contrasena restablecida correctamente.' });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+module.exports = { FORGOT_PASSWORD_MESSAGE, forgotPassword, login, logout, resetPassword, solicitarAcceso };
