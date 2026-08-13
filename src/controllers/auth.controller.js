@@ -165,7 +165,8 @@ const FORGOT_PASSWORD_MESSAGE = 'Si el correo esta registrado, recibiras instruc
 
 const forgotPassword = async (req, res) => {
   try {
-    await passwordResetService.requestPasswordReset(req.body.email);
+    const channel = req.body.channel === 'mobile' ? 'mobile' : 'web';
+    await passwordResetService.requestPasswordReset(req.body.email, { channel });
   } catch {
     console.error('[Auth] No se pudo procesar el correo de recuperacion de contrasena');
   }

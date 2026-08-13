@@ -158,3 +158,17 @@ test('el enlace de correo usa FRONTEND_RESET_URL y codifica el token', () => {
     else process.env.FRONTEND_RESET_URL = previous;
   }
 });
+
+test('el enlace movil usa MOBILE_RESET_URL para abrir la app', () => {
+  const originalMobileUrl = process.env.MOBILE_RESET_URL;
+  process.env.MOBILE_RESET_URL = 'physioactive://reset-password';
+  try {
+    const link = new URL(emailService.buildResetLink('token movil', 'mobile'));
+    assert.equal(link.protocol, 'physioactive:');
+    assert.equal(link.hostname, 'reset-password');
+    assert.equal(link.searchParams.get('token'), 'token movil');
+  } finally {
+    if (originalMobileUrl === undefined) delete process.env.MOBILE_RESET_URL;
+    else process.env.MOBILE_RESET_URL = originalMobileUrl;
+  }
+});

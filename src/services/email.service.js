@@ -27,14 +27,17 @@ const createTransporter = () => {
   });
 };
 
-const buildResetLink = (token) => {
-  const resetUrl = new URL(required('FRONTEND_RESET_URL'));
+const buildResetLink = (token, channel = 'web') => {
+  const variable = channel === 'mobile' && process.env.MOBILE_RESET_URL
+    ? 'MOBILE_RESET_URL'
+    : 'FRONTEND_RESET_URL';
+  const resetUrl = new URL(required(variable));
   resetUrl.searchParams.set('token', token);
   return resetUrl.toString();
 };
 
-const sendPasswordResetEmail = async (to, token) => {
-  const resetLink = buildResetLink(token);
+const sendPasswordResetEmail = async (to, token, channel) => {
+  const resetLink = buildResetLink(token, channel);
   await createTransporter().sendMail({
     from: required('EMAIL_FROM'),
     to,

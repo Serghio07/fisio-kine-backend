@@ -23,7 +23,7 @@ const requestPasswordReset = async (email, options = {}) => {
 
   try {
     const sendEmail = options.sendEmail || emailService.sendPasswordResetEmail;
-    await sendEmail(usuario.email, token);
+    await sendEmail(usuario.email, token, options.channel);
   } catch (error) {
     await Usuario.update(
       { reset_password_token_hash: null, reset_password_expires_at: null },

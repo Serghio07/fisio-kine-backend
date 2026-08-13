@@ -278,7 +278,8 @@ const crearCita = async (req, res, next) => {
       profesional_id: req.user.id
     });
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
-    await syncAppointment(citaCompleta);
+    // La sincronizacion externa no debe retrasar la confirmacion del guardado local.
+    void syncAppointment(citaCompleta);
     return res.status(201).json(citaCompleta);
   } catch (error) {
     return next(error);
@@ -309,7 +310,7 @@ const actualizarCita = async (req, res, next) => {
     } else if (payload.estado === 'Falto') await ensureNoShowSession(cita, { transaction });
     await transaction.commit();
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
-    await syncAppointment(citaCompleta);
+    void syncAppointment(citaCompleta);
     return res.json(citaCompleta);
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
