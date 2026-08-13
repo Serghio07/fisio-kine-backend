@@ -25,7 +25,16 @@ const eventBody = (cita) => {
 const syncInFlight = new Map();
 const performSync = async (cita) => {
   try {
-    if (cita.estado === 'Cancelada') { if (cita.google_event_id) await googleCalendar.deleteEvent(cita.google_event_id); return; }
+    if (cita.estado === 'Cancelada') {
+      // Una cancelacion puede llegar mientras la creacion del evento aun esta en curso.
+      // Recargar permite obtener el google_event_id que esa operacion acaba de guardar.
+      if (!cita.google_event_id && typeof cita.reload === 'function') await cita.reload();
+      if (cita.google_event_id) {
+        await googleCalendar.deleteEvent(cita.google_event_id);
+        await cita.update({ google_event_id: null }, { hooks: false });
+      }
+      return;
+    }
     if (cita.google_event_id) {
       try { return await googleCalendar.updateEvent(cita.google_event_id, eventBody(cita)); }
       catch (error) {
@@ -42,9 +51,14 @@ const performSync = async (cita) => {
 };
 const syncAppointment = (cita) => {
   const key = String(cita.id);
-  if (syncInFlight.has(key)) return syncInFlight.get(key);
-  const operation = performSync(cita).finally(() => syncInFlight.delete(key));
+  const previous = syncInFlight.get(key) || Promise.resolve();
+  // Las operaciones de una misma cita deben conservar el orden: crear/actualizar
+  // primero y cancelar despues, incluso cuando llegan casi simultaneamente.
+  const operation = previous.catch(() => undefined).then(() => performSync(cita));
   syncInFlight.set(key, operation);
+  operation.finally(() => {
+    if (syncInFlight.get(key) === operation) syncInFlight.delete(key);
+  });
   return operation;
 };
 const deleteAppointmentEvent = async (eventId) => {
