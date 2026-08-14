@@ -31,6 +31,7 @@ const BlogCategory = require('./BlogCategory');
 const BlogPost = require('./BlogPost');
 const BlogTag = require('./BlogTag');
 const BlogPostTag = require('./BlogPostTag');
+const GaleriaImagen = require('./GaleriaImagen');
 const {
   WhatsappSolicitudCita,
   TIPOS_SOLICITUD_WHATSAPP,
@@ -239,6 +240,10 @@ BlogPost.belongsTo(Usuario, { foreignKey: 'modificadoPorId', as: 'modificado_por
 BlogPost.belongsTo(Usuario, { foreignKey: 'publicadoPorId', as: 'publicado_por' });
 BlogPost.belongsToMany(BlogTag, { through: BlogPostTag, foreignKey: 'blog_post_id', otherKey: 'blog_tag_id', as: 'etiquetas' });
 BlogTag.belongsToMany(BlogPost, { through: BlogPostTag, foreignKey: 'blog_tag_id', otherKey: 'blog_post_id', as: 'articulos' });
+Usuario.hasMany(GaleriaImagen, { foreignKey: 'creadoPorId', as: 'imagenes_galeria_creadas', onDelete: 'RESTRICT' });
+GaleriaImagen.belongsTo(Usuario, { foreignKey: 'creadoPorId', as: 'creado_por' });
+Usuario.hasMany(GaleriaImagen, { foreignKey: 'modificadoPorId', as: 'imagenes_galeria_modificadas', onDelete: 'RESTRICT' });
+GaleriaImagen.belongsTo(Usuario, { foreignKey: 'modificadoPorId', as: 'modificado_por' });
 
 module.exports = {
   sequelize,
@@ -277,6 +282,7 @@ module.exports = {
   BlogPost,
   BlogTag,
   BlogPostTag,
+  GaleriaImagen,
   WhatsappSolicitudCita,
   TIPOS_SOLICITUD_WHATSAPP,
   ESTADOS_SOLICITUD_WHATSAPP,

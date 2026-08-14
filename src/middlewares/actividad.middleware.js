@@ -12,6 +12,7 @@ const modulos = {
   citas: 'Cita',
   'documentos-clinicos': 'Documento clínico',
   'tareas-personal': 'Tarea extra',
+  galeria: 'Galería',
   usuarios: 'Usuario',
   personal: 'Personal',
   'planillas-personal': 'Planilla de personal'
@@ -64,6 +65,7 @@ const detalleActividad = (modulo, accion, body) => {
     'Historia clínica': `${accion} una historia clínica${body.diagnostico_medico ? `: ${body.diagnostico_medico}` : ''}`,
     Sesión: `${accion} una sesión${body.asistencia ? ` con asistencia "${body.asistencia}"` : ''}${body.observacion ? `: ${body.observacion}` : ''}`,
     Cita: `${accion} una cita${body.tipo_atencion ? ` de ${body.tipo_atencion}` : ''}${body.motivo ? `: ${body.motivo}` : ''}`,
+    Galería: `${accion} una imagen de Galería${body.titulo ? `: ${body.titulo}` : ''}`,
     'Informe médico': `${accion} un informe médico${body.diagnostico ? `: ${body.diagnostico}` : ''}`,
     'Documento clínico': `${accion} un documento ${body.tipo || 'clínico'}${body.titulo ? `: ${body.titulo}` : ''}`,
     'Planilla de atención': `${accion} una planilla de atención${body.diagnostico ? `: ${body.diagnostico}` : ''}`,

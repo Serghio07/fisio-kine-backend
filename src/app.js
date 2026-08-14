@@ -27,6 +27,8 @@ const registrarActividad = require('./middlewares/actividad.middleware');
 const blogRoutes = require('./routes/blog.routes');
 const blogCategoryRoutes = require('./routes/blogCategory.routes');
 const publicBlogRoutes = require('./routes/publicBlog.routes');
+const galeriaRoutes = require('./routes/galeria.routes');
+const publicGaleriaRoutes = require('./routes/publicGaleria.routes');
 const whatsappRoutes = require('./routes/whatsapp.routes');
 const whatsappReceptionReferralRoutes = require('./routes/whatsappReceptionReferral.routes');
 const internalNotificationRoutes = require('./routes/internalNotification.routes');
@@ -101,6 +103,8 @@ app.use('/api/assistant', assistantRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/blog-categories', blogCategoryRoutes);
 app.use('/api/public/blog', publicBlogRoutes);
+app.use('/api/galeria', galeriaRoutes);
+app.use('/api/public/galeria', publicGaleriaRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });
