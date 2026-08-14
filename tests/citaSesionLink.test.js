@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { appointmentStateForAttendance, ensureNoShowSession } = require('../src/services/citaSesionLink.service');
+const { appointmentStateForAttendance, ensureNoShowSession, findAndLockAppointmentForSession } = require('../src/services/citaSesionLink.service');
 
 test('mapea asistencia al estado de cita', () => {
   assert.equal(appointmentStateForAttendance('asistio', 'Programada'), 'Atendida');
@@ -23,4 +23,14 @@ test('reutiliza vínculo existente sin crear duplicado', async () => {
   const result = await ensureNoShowSession({ estado: 'Falto', sesion_id: 9 }, { sessionModel: { findByPk: async (id) => ({ id }), create: async () => { creates += 1; } } });
   assert.equal(result.id, 9);
   assert.equal(creates, 0);
+});
+
+test('vincula por fecha cuando una numeración histórica está desfasada', async () => {
+  const calls = [];
+  const fallback = { id: 14, numero_sesion: 3, estado: 'Programada' };
+  const appointmentModel = { findOne: async (options) => { calls.push(options.where); return calls.length === 1 ? null : fallback; } };
+  const result = await findAndLockAppointmentForSession({ paciente_id: 4, historia_clinica_id: 5, fecha: '2026-08-14', numero_sesion: 2 }, { transaction: { LOCK: { UPDATE: 'UPDATE' } }, appointmentModel });
+  assert.equal(result, fallback);
+  assert.equal(calls[0].numero_sesion, 2);
+  assert.equal(calls[1].numero_sesion, undefined);
 });

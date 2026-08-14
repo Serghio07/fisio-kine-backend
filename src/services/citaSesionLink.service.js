@@ -49,19 +49,18 @@ const ensureNoShowSession = async (appointment, { transaction, sessionModel = Se
   return session;
 };
 
-const findAndLockAppointmentForSession = async (payload, { transaction, appointmentModel = Cita } = {}) => appointmentModel.findOne({
-  where: {
+const findAndLockAppointmentForSession = async (payload, { transaction, appointmentModel = Cita } = {}) => {
+  const commonWhere = {
     paciente_id: payload.paciente_id,
     historia_clinica_id: payload.historia_clinica_id || null,
     fecha: payload.fecha,
-    numero_sesion: payload.numero_sesion,
     sesion_id: null,
     estado: ['Programada', 'Confirmada', 'Pendiente', 'No asistio', 'Falto']
-  },
-  order: [['id', 'ASC']],
-  transaction,
-  lock: transaction?.LOCK?.UPDATE
-});
+  };
+  const options = { order: [['numero_sesion', 'ASC'], ['id', 'ASC']], transaction, lock: transaction?.LOCK?.UPDATE };
+  const exact = await appointmentModel.findOne({ where: { ...commonWhere, numero_sesion: payload.numero_sesion }, ...options });
+  return exact || appointmentModel.findOne({ where: commonWhere, ...options });
+};
 
 const syncAppointmentFromSession = async (session, { transaction, appointmentModel = Cita } = {}) => {
   const appointment = await appointmentModel.findOne({ where: { sesion_id: session.id }, transaction, lock: transaction?.LOCK?.UPDATE });
