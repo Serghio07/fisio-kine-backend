@@ -46,3 +46,23 @@ test('repara una cita programada que ya tiene una sesión asistida', async () =>
   assert.equal(repaired, 1);
   assert.deepEqual(updated, { sesion_id: 91, estado: 'Atendida' });
 });
+
+test('corrige una inasistencia automática cuando ya existía atención y conserva trazabilidad', async () => {
+  let appointmentUpdate; let noShowUpdate;
+  const appointment = { id: 78, paciente_id: 8, historia_clinica_id: 12, fecha: '2026-08-14', numero_sesion: 14, estado: 'No asistio', sesion_id: 200, update: async (value) => { appointmentUpdate = value; } };
+  let appointmentReads = 0;
+  const appointmentModel = {
+    findAll: async () => (++appointmentReads === 1 ? [appointment] : [{ sesion_id: 200 }])
+  };
+  const attended = { id: 140, paciente_id: 8, historia_clinica_id: 12, fecha: '2026-08-14', numero_sesion: 14, asistencia: 'asistio', anulada: false };
+  const sessionModel = {
+    findAll: async () => [attended],
+    findByPk: async () => ({ id: 200, asistencia: 'no_asistio', anulada: false, update: async (value) => { noShowUpdate = value; } })
+  };
+  const db = { transaction: async (callback) => callback({ LOCK: { UPDATE: 'UPDATE' } }) };
+  const repaired = await reconcileAttendedAppointments({ db, appointmentModel, sessionModel });
+  assert.equal(repaired, 1);
+  assert.deepEqual(appointmentUpdate, { sesion_id: 140, estado: 'Atendida' });
+  assert.equal(noShowUpdate.anulada, true);
+  assert.match(noShowUpdate.observacion_anulacion, /prevalece la atención/i);
+});

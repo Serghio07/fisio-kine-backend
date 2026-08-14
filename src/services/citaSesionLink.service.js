@@ -73,8 +73,7 @@ const reconcileAttendedAppointments = async ({ db = sequelize, appointmentModel 
   const appointments = await appointmentModel.findAll({
     where: {
       origen: 'Plan de tratamiento',
-      estado: { [Op.in]: ['Pendiente', 'Programada', 'Confirmada'] },
-      sesion_id: null
+      estado: { [Op.in]: ['Pendiente', 'Programada', 'Confirmada', 'No asistio', 'Falto'] }
     },
     order: [['fecha', 'ASC'], ['numero_sesion', 'ASC'], ['id', 'ASC']],
     transaction,
@@ -103,6 +102,16 @@ const reconcileAttendedAppointments = async ({ db = sequelize, appointmentModel 
     const exact = sessions.find((session) => Number(session.numero_sesion) === Number(appointment.numero_sesion));
     const session = exact || (sessions.length === 1 ? sessions[0] : null);
     if (!session) continue;
+    if (appointment.sesion_id && Number(appointment.sesion_id) !== Number(session.id)) {
+      const previousSession = await sessionModel.findByPk(appointment.sesion_id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (previousSession?.asistencia === 'no_asistio' && !previousSession.anulada) {
+        await previousSession.update({
+          anulada: true,
+          motivo_anulacion: 'Corrección automática de asistencia',
+          observacion_anulacion: 'La cita tenía una sesión realizada vinculable y prevalece la atención registrada.'
+        }, { transaction });
+      }
+    }
     await appointment.update({ sesion_id: session.id, estado: 'Atendida' }, { transaction });
     usedSessionIds.add(Number(session.id));
     repaired += 1;
