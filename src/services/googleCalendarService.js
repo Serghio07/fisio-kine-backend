@@ -62,11 +62,11 @@ const getConnectionStatus = async () => {
       singleEvents: false,
       timeout: GOOGLE_STATUS_TIMEOUT_MS
     });
-    // calendars.get resuelve "primary" al identificador real del calendario
-    // usando el permiso de eventos ya concedido.
-    const calendarResponse = await calendar.calendars.get({ calendarId: authorization.calendarId, timeout: GOOGLE_STATUS_TIMEOUT_MS });
-    const calendarName = calendarResponse.data.summary || eventsResponse.data.summary || null;
-    const calendarId = calendarResponse.data.id || authorization.calendarId;
+    // events.list valida la conexion con el mismo scope concedido al conectar.
+    // No se consulta calendars.get porque algunas autorizaciones existentes no
+    // incluyen ese permiso y quedaban marcadas incorrectamente como invalidas.
+    const calendarName = eventsResponse.data.summary || null;
+    const calendarId = authorization.calendarId;
     const accountEmail = [calendarName, calendarId]
       .find((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim())) || null;
     return { connected: true, calendarId, calendarName, accountEmail, connectedAt: stored.created_at || null };
