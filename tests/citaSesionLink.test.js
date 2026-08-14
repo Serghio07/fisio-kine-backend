@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { appointmentStateForAttendance, ensureNoShowSession, findAndLockAppointmentForSession } = require('../src/services/citaSesionLink.service');
+const { appointmentStateForAttendance, ensureNoShowSession, findAndLockAppointmentForSession, reconcileAttendedAppointments } = require('../src/services/citaSesionLink.service');
 
 test('mapea asistencia al estado de cita', () => {
   assert.equal(appointmentStateForAttendance('asistio', 'Programada'), 'Atendida');
@@ -33,4 +33,16 @@ test('vincula por fecha cuando una numeración histórica está desfasada', asyn
   assert.equal(result, fallback);
   assert.equal(calls[0].numero_sesion, 2);
   assert.equal(calls[1].numero_sesion, undefined);
+});
+
+test('repara una cita programada que ya tiene una sesión asistida', async () => {
+  let updated;
+  const appointment = { id: 63, paciente_id: 7, historia_clinica_id: 4, fecha: '2026-08-14', numero_sesion: 9, update: async (value) => { updated = value; } };
+  let appointmentReads = 0;
+  const appointmentModel = { findAll: async () => (++appointmentReads === 1 ? [appointment] : []) };
+  const sessionModel = { findAll: async () => [{ id: 91, paciente_id: 7, historia_clinica_id: 4, fecha: '2026-08-14', numero_sesion: 9, asistencia: 'asistio', anulada: false }] };
+  const db = { transaction: async (callback) => callback({ LOCK: { UPDATE: 'UPDATE' } }) };
+  const repaired = await reconcileAttendedAppointments({ db, appointmentModel, sessionModel });
+  assert.equal(repaired, 1);
+  assert.deepEqual(updated, { sesion_id: 91, estado: 'Atendida' });
 });

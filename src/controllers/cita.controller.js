@@ -10,7 +10,7 @@ const {
   toMinutes,
   toTime
 } = require('../services/appointmentAvailability.service');
-const { ensureNoShowSession } = require('../services/citaSesionLink.service');
+const { ensureNoShowSession, reconcileAttendedAppointments } = require('../services/citaSesionLink.service');
 const { cleanupTemporaryWhatsappNoShow } = require('../services/temporaryWhatsappPatientCleanup.service');
 const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
 const { deleteAppointmentEvent, syncAppointment } = require('../services/googleCalendarSync.service');
@@ -235,6 +235,7 @@ const buildFiltros = (query = {}) => {
 
 const listarCitas = async (req, res, next) => {
   try {
+    await reconcileAttendedAppointments();
     await actualizarCitasNoAsistidas();
     const citas = await Cita.findAll({
       where: buildFiltros(req.query),
@@ -373,6 +374,7 @@ const listarCitasPaciente = async (req, res, next) => {
 
 const listarCalendario = async (req, res, next) => {
   try {
+    await reconcileAttendedAppointments();
     await actualizarCitasNoAsistidas();
     const citas = await Cita.findAll({
       where: buildFiltros(req.query),
@@ -387,6 +389,7 @@ const listarCalendario = async (req, res, next) => {
 
 const listarPeriodo = (tipo) => async (req, res, next) => {
   try {
+    await reconcileAttendedAppointments();
     await actualizarCitasNoAsistidas();
     const hoy = new Date(`${boliviaDate()}T12:00:00-04:00`);
     const inicio = new Date(hoy);
