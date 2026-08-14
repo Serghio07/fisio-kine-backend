@@ -14,8 +14,8 @@ const SAFE_CONTEXTS = Object.freeze({
   general: 'Physio Active: sistema interno de gestión de fisioterapia.'
 });
 
-const RESTRICTED_PATTERN = /(contraseñ|password|api[ _-]?key|token|cookie|\.env|variable(s)? de entorno|sql|base de datos|archivo(s)? interno|prompt interno|ignora (los |tus )?(permisos|instrucciones)|actua como admin|actúa como admin|pagos?|finanzas?|sueldos?|salarios?|arqueos?)/i;
-const CLINICAL_PATTERN = /(que|qué) (diagnostico|diagnóstico|medicamento|tratamiento)\b|prescrib|recetar|que tiene (el|la) paciente|analiza(r)? (la )?historia clinica/i;
+const RESTRICTED_PATTERN = /(contraseñ|password|credencial|api[ _-]?key|token|cookie|\.env|variable(s)? de entorno|sql|base de datos|archivo(s)? interno|prompt interno|ignora (los |tus )?(permisos|instrucciones)|actua como admin|actúa como admin|pagos?|finanzas?|sueldos?|salarios?|arqueos?)/i;
+const CLINICAL_PATTERN = /(que|qué) (diagnostico|diagnóstico|medicamento|tratamiento)\b|prescrib|rec[eé]t|que tiene (el|la) paciente|analiza(r)? (la )?historia cl[ií]nica|qu[eé] enfermedad tiene/i;
 const WRITE_PATTERN = /\b(agenda|crea|registra|modifica|actualiza|elimina|borra|cancela)\b.*\b(cita|paciente|sesion|sesión|pago|usuario)\b/i;
 
 function sanitizeContext(context) {
