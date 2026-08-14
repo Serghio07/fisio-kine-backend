@@ -335,16 +335,17 @@ const recalcularProgresoHistoria = async (historiaClinicaId, transaction) => {
   });
 
   let realizadas = 0;
+  let numeroCronologico = 0;
   const fechasAfectadas = new Map();
 
   for (const sesion of sesiones) {
+    numeroCronologico += 1;
     if (sesion.asistencia === 'asistio') realizadas += 1;
-    const numeroSesion = sesion.asistencia === 'asistio' ? realizadas : Math.max(realizadas, 1);
 
     await sesion.update({
       sesiones_debe: contratadas,
       sesiones_hizo: realizadas,
-      numero_sesion: numeroSesion
+      numero_sesion: numeroCronologico
     }, { transaction });
 
     fechasAfectadas.set(`${sesion.paciente_id}:${sesion.fecha}`, {
@@ -411,16 +412,27 @@ const prepararSesionConHistoria = async (payload, transaction, sesionActual = nu
 };
 
 const listarSesiones = async (req, res, next) => {
-  const transaction = await sequelize.transaction();
   try {
-    await recalcularHistoriasConSesiones(transaction);
-    await transaction.commit();
     const incluirAnuladas = String(req.query.incluir_anuladas || '').toLowerCase() === 'true';
     const where = incluirAnuladas ? {} : { anulada: false };
     const sesiones = await Sesion.findAll({ where, include: includeSesion, order: [['fecha', 'DESC'], ['id', 'DESC']] });
-    return res.json(sesiones);
+    // Normaliza la respuesta sin escribir en la base de datos. Esto corrige de
+    // inmediato registros históricos que quedaron repetidos como "Sesión 1".
+    const numeroPorId = new Map();
+    const porHistoria = new Map();
+    sesiones.filter((sesion) => !sesion.anulada).forEach((sesion) => {
+      const key = String(sesion.historia_clinica_id || `sin-historia-${sesion.paciente_id}`);
+      if (!porHistoria.has(key)) porHistoria.set(key, []);
+      porHistoria.get(key).push(sesion);
+    });
+    porHistoria.forEach((items) => items
+      .sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')) || Number(a.id) - Number(b.id))
+      .forEach((sesion, index) => numeroPorId.set(String(sesion.id), index + 1)));
+    return res.json(sesiones.map((sesion) => ({
+      ...sesion.toJSON(),
+      numero_sesion: numeroPorId.get(String(sesion.id)) || sesion.numero_sesion
+    })));
   } catch (error) {
-    if (!transaction.finished) await transaction.rollback();
     return next(error);
   }
 };
