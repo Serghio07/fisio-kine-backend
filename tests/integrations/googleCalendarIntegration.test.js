@@ -60,11 +60,11 @@ test('callback rechaza state asociado a usuario que ya no es ADMIN activo', asyn
 
 test('status devuelve solamente informacion segura del servicio', async () => {
   const original = googleCalendar.getConnectionStatus;
-  googleCalendar.getConnectionStatus = async () => ({ connected: true, calendarId: 'primary', connectedAt: null });
+  googleCalendar.getConnectionStatus = async () => ({ connected: true, calendarId: 'cuenta@gmail.com', calendarName: 'Principal', accountEmail: 'cuenta@gmail.com', connectedAt: null });
   try {
     const res = response();
     await controller.status({}, res, (error) => { throw error; });
-    assert.deepEqual(res.body, { connected: true, calendarId: 'primary', connectedAt: null });
+    assert.deepEqual(res.body, { connected: true, calendarId: 'cuenta@gmail.com', calendarName: 'Principal', accountEmail: 'cuenta@gmail.com', connectedAt: null });
     assert.doesNotMatch(JSON.stringify(res.body), /token|secret/i);
   } finally { googleCalendar.getConnectionStatus = original; }
 });

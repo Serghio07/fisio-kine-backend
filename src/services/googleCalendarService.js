@@ -55,13 +55,21 @@ const getConnectionStatus = async () => {
   if (!stored?.refresh_token_cifrado) return { connected: false };
   try {
     const authorization = await getAuthorizedClient();
-    await google.calendar({ version: 'v3', auth: authorization.client }).events.list({
+    const calendar = google.calendar({ version: 'v3', auth: authorization.client });
+    const eventsResponse = await calendar.events.list({
       calendarId: authorization.calendarId,
       maxResults: 1,
       singleEvents: false,
       timeout: GOOGLE_STATUS_TIMEOUT_MS
     });
-    return { connected: true, calendarId: authorization.calendarId, connectedAt: stored.created_at || null };
+    // calendars.get resuelve "primary" al identificador real del calendario
+    // usando el permiso de eventos ya concedido.
+    const calendarResponse = await calendar.calendars.get({ calendarId: authorization.calendarId, timeout: GOOGLE_STATUS_TIMEOUT_MS });
+    const calendarName = calendarResponse.data.summary || eventsResponse.data.summary || null;
+    const calendarId = calendarResponse.data.id || authorization.calendarId;
+    const accountEmail = [calendarName, calendarId]
+      .find((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim())) || null;
+    return { connected: true, calendarId, calendarName, accountEmail, connectedAt: stored.created_at || null };
   } catch {
     console.error('[Google Calendar] No se pudo verificar la conexion almacenada');
     return { connected: false, reason: 'AUTHORIZATION_INVALID' };

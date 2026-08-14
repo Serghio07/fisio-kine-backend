@@ -8,45 +8,11 @@ const appointmentStateForAttendance = (attendance, currentState) => ({
   cancelada: 'Cancelada'
 }[attendance] || currentState);
 
-const ensureNoShowSession = async (appointment, { transaction, sessionModel = Sesion, appointmentModel = Cita } = {}) => {
+// La inasistencia pertenece a la agenda y no debe crear atenciones clinicas.
+// Conservamos cualquier vinculo ya existente, pero nunca agregamos sesiones.
+const ensureNoShowSession = async (appointment, { transaction, sessionModel = Sesion } = {}) => {
   if (!['No asistio', 'Falto'].includes(appointment.estado)) return null;
-  if (appointment.sesion_id) return sessionModel.findByPk(appointment.sesion_id, { transaction });
-  let session = await sessionModel.findOne({
-    where: {
-      paciente_id: appointment.paciente_id,
-      historia_clinica_id: appointment.historia_clinica_id || null,
-      fecha: appointment.fecha,
-      numero_sesion: appointment.numero_sesion || 1,
-      asistencia: 'no_asistio',
-      anulada: false
-    },
-    transaction,
-    lock: transaction?.LOCK?.UPDATE
-  });
-  if (session) {
-    const alreadyLinked = await appointmentModel.findOne({ where: { sesion_id: session.id }, transaction, lock: transaction?.LOCK?.UPDATE });
-    if (alreadyLinked && Number(alreadyLinked.id) !== Number(appointment.id)) session = null;
-  }
-  if (!session) session = await sessionModel.create({
-    paciente_id: appointment.paciente_id,
-    historia_clinica_id: appointment.historia_clinica_id || null,
-    usuario_id: appointment.profesional_id || appointment.usuario_id || null,
-    fecha: appointment.fecha,
-    numero_sesion: appointment.numero_sesion || 1,
-    sesiones_debe: 0,
-    sesiones_hizo: 0,
-    asistencia: 'no_asistio',
-    estado_pago: 'Sin costo',
-    monto_sesion: 0,
-    monto_pagado: 0,
-    saldo_pendiente: 0,
-    motivo_sin_costo: 'Inasistencia: no se realizó atención clínica.',
-    aplica_farmacos: false,
-    farmacos: [],
-    observacion: 'Inasistencia registrada automáticamente desde la cita.'
-  }, { transaction });
-  await appointment.update({ sesion_id: session.id, estado: 'No asistio' }, { transaction });
-  return session;
+  return appointment.sesion_id ? sessionModel.findByPk(appointment.sesion_id, { transaction }) : null;
 };
 
 const findAndLockAppointmentForSession = async (payload, { transaction, appointmentModel = Cita } = {}) => {
@@ -86,7 +52,6 @@ const reconcileAttendedAppointments = async ({ db = sequelize, appointmentModel 
   const allSessions = await sessionModel.findAll({
     where: {
       paciente_id: { [Op.in]: [...new Set(appointments.map((item) => item.paciente_id))] },
-      fecha: { [Op.in]: [...new Set(appointments.map((item) => item.fecha))] },
       asistencia: 'asistio',
       anulada: false
     },
@@ -95,12 +60,13 @@ const reconcileAttendedAppointments = async ({ db = sequelize, appointmentModel 
   });
   let repaired = 0;
   for (const appointment of appointments) {
-    const sessions = allSessions.filter((session) => !usedSessionIds.has(Number(session.id))
+    const historySessions = allSessions.filter((session) => !usedSessionIds.has(Number(session.id))
       && Number(session.paciente_id) === Number(appointment.paciente_id)
-      && Number(session.historia_clinica_id) === Number(appointment.historia_clinica_id)
-      && String(session.fecha) === String(appointment.fecha));
-    const exact = sessions.find((session) => Number(session.numero_sesion) === Number(appointment.numero_sesion));
-    const session = exact || (sessions.length === 1 ? sessions[0] : null);
+      && Number(session.historia_clinica_id) === Number(appointment.historia_clinica_id));
+    const sameDate = historySessions.filter((session) => String(session.fecha) === String(appointment.fecha));
+    const exactDate = sameDate.find((session) => Number(session.numero_sesion) === Number(appointment.numero_sesion));
+    const exactNumber = historySessions.filter((session) => Number(session.numero_sesion) === Number(appointment.numero_sesion));
+    const session = exactDate || (sameDate.length === 1 ? sameDate[0] : null) || (exactNumber.length === 1 ? exactNumber[0] : null);
     if (!session) continue;
     if (appointment.sesion_id && Number(appointment.sesion_id) !== Number(session.id)) {
       const previousSession = await sessionModel.findByPk(appointment.sesion_id, { transaction, lock: transaction.LOCK.UPDATE });

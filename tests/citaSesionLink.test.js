@@ -8,14 +8,14 @@ test('mapea asistencia al estado de cita', () => {
   assert.equal(appointmentStateForAttendance('reprogramada', 'Programada'), 'Reprogramada');
 });
 
-test('crea sesión mínima y vincula una inasistencia', async () => {
-  let created; let updated;
-  const appointment = { id: 12, estado: 'No asistio', sesion_id: null, paciente_id: 4, historia_clinica_id: 5, fecha: '2026-08-01', numero_sesion: 5, profesional_id: 1, update: async (value) => { updated = value; Object.assign(appointment, value); } };
-  const sessionModel = { findOne: async () => null, create: async (value) => { created = { id: 33, ...value }; return created; } };
-  const result = await ensureNoShowSession(appointment, { transaction: { LOCK: { UPDATE: 'UPDATE' } }, sessionModel, appointmentModel: { findOne: async () => null } });
-  assert.equal(result.asistencia, 'no_asistio');
-  assert.equal(created.estado_pago, 'Sin costo');
-  assert.deepEqual(updated, { sesion_id: 33, estado: 'No asistio' });
+test('una inasistencia de agenda no crea una sesión clínica', async () => {
+  let creates = 0;
+  const result = await ensureNoShowSession({ estado: 'No asistio', sesion_id: null }, {
+    transaction: {},
+    sessionModel: { create: async () => { creates += 1; } }
+  });
+  assert.equal(result, null);
+  assert.equal(creates, 0);
 });
 
 test('reutiliza vínculo existente sin crear duplicado', async () => {
@@ -45,6 +45,17 @@ test('repara una cita programada que ya tiene una sesión asistida', async () =>
   const repaired = await reconcileAttendedAppointments({ db, appointmentModel, sessionModel });
   assert.equal(repaired, 1);
   assert.deepEqual(updated, { sesion_id: 91, estado: 'Atendida' });
+});
+
+test('vincula por número real aunque la atención se haya registrado en otra fecha', async () => {
+  let updated;
+  const appointment = { id: 66, paciente_id: 8, historia_clinica_id: 12, fecha: '2026-08-14', numero_sesion: 2, update: async (value) => { updated = value; } };
+  let appointmentReads = 0;
+  const appointmentModel = { findAll: async () => (++appointmentReads === 1 ? [appointment] : []) };
+  const sessionModel = { findAll: async () => [{ id: 102, paciente_id: 8, historia_clinica_id: 12, fecha: '2026-08-13', numero_sesion: 2, asistencia: 'asistio', anulada: false }] };
+  const db = { transaction: async (callback) => callback({ LOCK: { UPDATE: 'UPDATE' } }) };
+  await reconcileAttendedAppointments({ db, appointmentModel, sessionModel });
+  assert.deepEqual(updated, { sesion_id: 102, estado: 'Atendida' });
 });
 
 test('corrige una inasistencia automática cuando ya existía atención y conserva trazabilidad', async () => {
