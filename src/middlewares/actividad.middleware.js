@@ -25,13 +25,34 @@ const acciones = {
 };
 
 const camposPrivados = /password|contrasena|token|foto|firma|secret/i;
-const limpiarDatos = (value, depth = 0) => {
-  if (depth > 3 || value === null || value === undefined) return value;
+const camposInternosSequelize = new Set([
+  '_options', '_previousDataValues', 'dataValues', 'sequelize', 'parent',
+  'include', 'includeMap', 'includeNames', 'model', 'transaction', 'request', 'req', 'res'
+]);
+
+const datosPlanos = (value) => {
+  if (!value || typeof value !== 'object') return value;
+  if (value.dataValues && typeof value.get === 'function') return value.get({ plain: true });
+  return value;
+};
+
+const limpiarDatos = (input, depth = 0, visited = new WeakSet()) => {
+  const value = datosPlanos(input);
+  if (value === null || value === undefined) return value;
   if (typeof value === 'string') return value.slice(0, 500);
-  if (Array.isArray(value)) return value.slice(0, 20).map((item) => limpiarDatos(item, depth + 1));
   if (typeof value !== 'object') return value;
+  if (value instanceof Date) return value.toISOString();
+  if (depth > 3 || visited.has(value)) return undefined;
+  visited.add(value);
+  if (Array.isArray(value)) {
+    return value.slice(0, 20)
+      .map((item) => limpiarDatos(item, depth + 1, visited))
+      .filter((item) => item !== undefined);
+  }
   return Object.entries(value).reduce((result, [key, item]) => {
-    if (!camposPrivados.test(key)) result[key] = limpiarDatos(item, depth + 1);
+    if (camposPrivados.test(key) || camposInternosSequelize.has(key)) return result;
+    const limpio = limpiarDatos(item, depth + 1, visited);
+    if (limpio !== undefined) result[key] = limpio;
     return result;
   }, {});
 };
@@ -61,37 +82,42 @@ const registrarActividad = (req, res, next) => {
     return jsonOriginal(body);
   };
 
-  res.on('finish', () => {
-    if (!req.usuario || !acciones[req.method] || res.statusCode >= 400) return;
-    const segmento = req.originalUrl.split('?')[0].split('/').filter(Boolean)[1];
-    const modulo = modulos[segmento];
-    if (!modulo) return;
+  res.on('finish', async () => {
+    try {
+      if (!req.usuario || !acciones[req.method] || res.statusCode >= 400) return;
+      const segmento = req.originalUrl.split('?')[0].split('/').filter(Boolean)[1];
+      const modulo = modulos[segmento];
+      if (!modulo) return;
 
-    const { fecha, hora } = boliviaDateTime();
-    const entidad = respuesta?.usuario || respuesta;
-    const entidadId = entidad?.id || Number(req.originalUrl.split('?')[0].split('/').filter(Boolean)[2]) || null;
-    const pacienteId = req.body?.paciente_id
-      || (segmento === 'pacientes' ? entidadId : null);
-    const datos = {
-      ...limpiarDatos(entidad || {}),
-      ...limpiarDatos(req.body || {})
-    };
+      const { fecha, hora } = boliviaDateTime();
+      const entidad = respuesta?.usuario || respuesta;
+      const entidadId = entidad?.id || Number(req.originalUrl.split('?')[0].split('/').filter(Boolean)[2]) || null;
+      const pacienteId = req.body?.paciente_id
+        || (segmento === 'pacientes' ? entidadId : null);
+      const datos = {
+        ...(limpiarDatos(entidad || {}) || {}),
+        ...(limpiarDatos(req.body || {}) || {})
+      };
 
-    ActividadSistema.create({
-      usuario_id: req.usuario.id,
-      paciente_id: pacienteId || null,
-      entidad_id: entidadId,
-      fecha,
-      hora,
-      modulo,
-      accion: acciones[req.method],
-      detalle: detalleActividad(modulo, acciones[req.method], datos),
-      datos,
-      metodo: req.method,
-      ruta: req.originalUrl.split('?')[0]
-    }).catch((error) => console.error('No se pudo registrar actividad:', error.message));
+      await ActividadSistema.create({
+        usuario_id: req.usuario.id,
+        paciente_id: pacienteId || null,
+        entidad_id: entidadId,
+        fecha,
+        hora,
+        modulo,
+        accion: acciones[req.method],
+        detalle: detalleActividad(modulo, acciones[req.method], datos),
+        datos,
+        metodo: req.method,
+        ruta: req.originalUrl.split('?')[0]
+      });
+    } catch (error) {
+      console.error('No se pudo registrar actividad:', error.message);
+    }
   });
   next();
 };
 
 module.exports = registrarActividad;
+module.exports.limpiarDatos = limpiarDatos;
