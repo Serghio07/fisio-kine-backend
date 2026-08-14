@@ -415,7 +415,12 @@ const listarSesiones = async (req, res, next) => {
   try {
     const incluirAnuladas = String(req.query.incluir_anuladas || '').toLowerCase() === 'true';
     const where = incluirAnuladas ? {} : { anulada: false };
-    const sesiones = await Sesion.findAll({ where, include: includeSesion, order: [['fecha', 'DESC'], ['id', 'DESC']] });
+    const resumen = String(req.query.resumen || '').toLowerCase() === 'true';
+    const sesiones = await Sesion.findAll({
+      where,
+      include: resumen ? [] : includeSesion,
+      order: [['fecha', 'DESC'], ['id', 'DESC']]
+    });
     // Normaliza la respuesta sin escribir en la base de datos. Esto corrige de
     // inmediato registros históricos que quedaron repetidos como "Sesión 1".
     const numeroPorId = new Map();
