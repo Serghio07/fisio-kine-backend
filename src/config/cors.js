@@ -8,7 +8,7 @@ const validOrigin = (value) => {
 const getAllowedOrigins = (env = process.env) => {
   // Los orígenes LAN específicos se configuran en CORS_ALLOWED_ORIGINS.
   const configured = String(env.CORS_ALLOWED_ORIGINS || '').split(',').map((item) => item.trim()).filter(validOrigin);
-  if (env.NODE_ENV !== 'production') configured.push('http://localhost:5173', 'http://localhost:3001');
+  if (env.NODE_ENV !== 'production') configured.push('http://localhost:5173', 'http://localhost:5175', 'http://localhost:3001');
   return [...new Set(configured)];
 };
 

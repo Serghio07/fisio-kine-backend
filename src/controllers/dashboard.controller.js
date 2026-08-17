@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { Cita, HistoriaClinica, InformeMedico, Paciente, Sesion } = require('../models');
 const { boliviaDate } = require('../utils/boliviaDateTime');
+const { getDashboardDailySummary } = require('../services/dashboardDailySummary.service');
 
 const includePaciente = [{ model: Paciente, as: 'paciente' }];
 const ESTADOS_CITA_PENDIENTE = ['Pendiente', 'Programada', 'Confirmada', 'Reprogramada'];
@@ -110,10 +111,19 @@ const notificaciones = async (req, res, next) => {
   }
 };
 
+const resumenJornada = async (req, res, next) => {
+  try {
+    return res.json(await getDashboardDailySummary(req.user));
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   resumenDashboard,
   proximasCitas,
   sesionesHoy,
   pacientesRecientes,
-  notificaciones
+  notificaciones,
+  resumenJornada
 };
