@@ -29,6 +29,6 @@ router.get('/:id', obtenerCita);
 router.post('/', autorizarRoles('admin', 'personal'), crearCita);
 router.put('/:id', autorizarRoles('admin', 'personal'), actualizarCita);
 router.patch('/:id/estado', autorizarRoles('admin', 'personal'), cambiarEstadoCita);
-router.delete('/:id', autorizarRoles('admin'), eliminarCita);
+router.delete('/:id', autorizarRoles('admin', 'personal'), eliminarCita);
 
 module.exports = router;

@@ -101,7 +101,11 @@ const listarProfesionalesActivos = async (req, res, next) => {
     return res.json(profesionales.map((profesional) => {
       const data = profesional.toJSON();
       return {
-        ...data,
+        id: data.id,
+        nombre: data.nombre,
+        usuario: data.usuario,
+        rol: data.rol,
+        foto: data.foto,
         nombre_mostrado: data.ficha_personal?.nombre_mostrado || data.nombre
       };
     }));
