@@ -194,7 +194,7 @@ const crearProgramacion = async (req, res, next) => {
     for (const item of items) {
       const citaCreada = await Cita.create({
         paciente_id: historia.paciente_id, historia_clinica_id: historia.id,
-        profesional_id: item.profesional_id || req.usuario.id, usuario_id: req.usuario.id,
+        profesional_id: req.usuario.id, usuario_id: req.usuario.id,
         numero_sesion: Number(item.numero_sesion), total_sesiones: indicadas,
         fecha: item.fecha, hora_inicio: normalizarHora(item.hora_inicio), hora_fin: normalizarHora(item.hora_fin),
         fecha_programada_original: item.fecha, hora_inicio_original: normalizarHora(item.hora_inicio), hora_fin_original: normalizarHora(item.hora_fin),

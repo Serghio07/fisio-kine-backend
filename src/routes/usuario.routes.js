@@ -18,7 +18,7 @@ router.use(autenticar);
 
 router.get('/profesionales/activos', listarProfesionalesActivos);
 router.get('/me', obtenerPerfil);
-router.put('/me', actualizarPerfil);
+router.put('/me', autorizarRoles('personal'), actualizarPerfil);
 
 router.use(autorizarRoles('admin'));
 

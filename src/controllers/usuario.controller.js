@@ -128,29 +128,66 @@ const obtenerPerfil = async (req, res, next) => {
 };
 
 const actualizarPerfil = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
   try {
-    const usuario = await Usuario.findByPk(req.user.id);
-    if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado' });
+    if (req.user?.rol !== 'personal') {
+      await transaction.rollback();
+      return res.status(403).json({ message: 'Solo el personal puede editar su perfil.' });
+    }
+    const usuario = await Usuario.findByPk(req.user.id, { transaction });
+    if (!usuario) { await transaction.rollback(); return res.status(404).json({ message: 'Usuario no encontrado' }); }
+    const ficha = await Personal.findOne({ where: { usuario_id: usuario.id }, transaction });
+    if (!ficha) { await transaction.rollback(); return res.status(404).json({ message: 'No se encontro la ficha del personal.' }); }
 
-    const nombre = limpiarTexto(req.body.nombre);
+    const nombres = textoMayusculas(req.body.nombres);
+    const apellidoPaterno = textoMayusculas(req.body.apellido_paterno);
+    const apellidoMaterno = textoMayusculas(req.body.apellido_materno) || null;
+    const ci = textoMayusculas(req.body.ci);
+    const tituloProfesional = limpiarTexto(req.body.titulo_profesional) || null;
+    const cargo = textoMayusculas(req.body.cargo);
+    const direccion = textoMayusculas(req.body.direccion) || null;
     const email = limpiarTexto(req.body.email) || null;
     const telefono = limpiarTexto(req.body.telefono) || null;
+    const nombreUsuario = limpiarTexto(req.body.usuario);
     const foto = req.body.foto || null;
 
-    if (!nombre) return res.status(400).json({ message: 'El nombre es obligatorio.' });
+    if (!nombres || !apellidoPaterno || !email || !ci || !cargo || !nombreUsuario) {
+      await transaction.rollback();
+      return res.status(400).json({ message: 'Nombres, apellido paterno, correo, cedula, cargo y usuario son obligatorios.' });
+    }
+    if (tituloProfesional && !['Doc.', 'Dr.', 'Dra.', 'Lic.', 'Tec. Sup.', 'Sr.', 'Sra.'].includes(tituloProfesional)) {
+      await transaction.rollback();
+      return res.status(400).json({ message: 'Titulo profesional no valido.' });
+    }
     const errorImagen = validarImagen(foto);
-    if (errorImagen) return res.status(400).json({ message: errorImagen });
-    if (email && await Usuario.findOne({ where: { email, id: { [Op.ne]: usuario.id } } })) {
+    if (errorImagen) {
+      await transaction.rollback();
+      return res.status(400).json({ message: errorImagen });
+    }
+    if (await Usuario.findOne({ where: { email, id: { [Op.ne]: usuario.id } }, transaction })) {
+      await transaction.rollback();
       return res.status(409).json({ message: 'El email ya esta registrado' });
     }
+    if (await Usuario.findOne({ where: { usuario: nombreUsuario, id: { [Op.ne]: usuario.id } }, transaction })) {
+      await transaction.rollback();
+      return res.status(409).json({ message: 'El usuario ya existe' });
+    }
+    if (await Personal.findOne({ where: { ci, id: { [Op.ne]: ficha.id } }, transaction })) {
+      await transaction.rollback();
+      return res.status(409).json({ message: 'La cedula ya esta registrada.' });
+    }
 
-    await usuario.update({ nombre, email, telefono, foto });
+    const nombre = [nombres, apellidoPaterno, apellidoMaterno].filter(Boolean).join(' ');
+    await ficha.update({ nombres, apellido_paterno: apellidoPaterno, apellido_materno: apellidoMaterno, ci, titulo_profesional: tituloProfesional, cargo, telefono, direccion }, { transaction });
+    await usuario.update({ nombre, usuario: nombreUsuario, email, telefono, foto }, { transaction });
+    await transaction.commit();
     const actualizado = await Usuario.findByPk(usuario.id, {
       attributes: atributosPublicos,
       include: includeFichaPersonal
     });
     return res.json({ message: 'Perfil actualizado correctamente.', usuario: actualizado });
   } catch (error) {
+    if (!transaction.finished) await transaction.rollback();
     return next(error);
   }
 };
