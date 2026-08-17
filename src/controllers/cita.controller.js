@@ -347,7 +347,9 @@ const cambiarEstadoCita = async (req, res, next) => {
     } else if (req.body.estado === 'Falto') await ensureNoShowSession(cita, { transaction });
     await transaction.commit();
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
-    await syncAppointment(citaCompleta);
+    // La actualizacion local ya fue confirmada. Google Calendar se sincroniza
+    // en segundo plano para no retrasar el refresco de la agenda.
+    void syncAppointment(citaCompleta);
     return res.json(citaCompleta);
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
