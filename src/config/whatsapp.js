@@ -42,6 +42,7 @@ const getWhatsappManualReplyRetryMinutes = () => readBoundedInteger('WHATSAPP_MA
 const readStrictBoolean = (name, fallback) => { const raw = process.env[name]; if (raw == null || raw === '') return fallback; if (raw === 'true') return true; if (raw === 'false') return false; console.warn(`[Notifications] Configuración inválida para ${name}; se usará el valor predeterminado`); return fallback; };
 const getInternalNotificationsEnabled = () => readStrictBoolean('INTERNAL_NOTIFICATIONS_ENABLED', true);
 const getInternalNotificationsPollSeconds = () => readBoundedInteger('INTERNAL_NOTIFICATIONS_POLL_SECONDS', 60, 15, 300);
+const getAppointmentInternalReminderScanSeconds = () => readBoundedInteger('APPOINTMENT_INTERNAL_REMINDER_SCAN_SECONDS', 15, 10, 60);
 const getWhatsappReferralPendingAlertEnabled = () => readStrictBoolean('WHATSAPP_REFERRAL_PENDING_ALERT_ENABLED', false);
 const getWhatsappReferralPendingAlertMinutes = () => readBoundedInteger('WHATSAPP_REFERRAL_PENDING_ALERT_MINUTES', 30, 5, 1440);
 const getWhatsappReferralPendingAlertScanMinutes = () => readBoundedInteger('WHATSAPP_REFERRAL_PENDING_ALERT_SCAN_MINUTES', 5, 1, 60);
@@ -110,7 +111,7 @@ module.exports = {
   getWhatsappReminderTemplate,
   getWhatsappManualRepliesEnabled, getWhatsappManualReplyWindowHours, getWhatsappManualReplyPreviewMinutes,
   getWhatsappManualReplyMaxAttempts, getWhatsappManualReplyRetryMinutes,
-  getInternalNotificationsEnabled, getInternalNotificationsPollSeconds,
+  getInternalNotificationsEnabled, getInternalNotificationsPollSeconds, getAppointmentInternalReminderScanSeconds,
   getWhatsappReferralPendingAlertEnabled, getWhatsappReferralPendingAlertMinutes,
   getWhatsappReferralPendingAlertScanMinutes, getWhatsappReferralPendingAlertRepeatHours,
   getWhatsappMonitoringEnabled,getWhatsappMonitoringPollSeconds,getWhatsappMonitoringMetricsDays,getWhatsappMonitoringExportMaxDays,getWhatsappMonitoringMetaCheckTimeoutMs,getWhatsappMonitoringRetentionDays

@@ -8,6 +8,7 @@ const app = require('./app');
 const { sequelize } = require('./models');
 const { startAppointmentReminderJob } = require('./jobs/appointmentReminder.job');
 const { startPendingReferralAlertJob } = require('./jobs/pendingReferralAlert.job');
+const { startInternalAppointmentReminderJob } = require('./jobs/internalAppointmentReminder.job');
 
 const PORT = process.env.PORT || 3000;
 
@@ -25,6 +26,7 @@ const iniciarServidor = async () => {
       console.log(`Servidor corriendo en http://localhost:${PORT}`);
       startAppointmentReminderJob();
       startPendingReferralAlertJob();
+      startInternalAppointmentReminderJob();
     });
   } catch (error) {
     console.error('No se pudo iniciar el servidor:', error.message);

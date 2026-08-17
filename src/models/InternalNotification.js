@@ -1,10 +1,10 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
-const NOTIFICATION_TYPES = Object.freeze(['NUEVA_DERIVACION', 'DERIVACION_ASIGNADA', 'RESPUESTA_PACIENTE', 'ENVIO_WHATSAPP_FALLIDO', 'DERIVACION_PENDIENTE_VENCIDA']);
+const NOTIFICATION_TYPES = Object.freeze(['NUEVA_DERIVACION', 'DERIVACION_ASIGNADA', 'RESPUESTA_PACIENTE', 'ENVIO_WHATSAPP_FALLIDO', 'DERIVACION_PENDIENTE_VENCIDA', 'CITA_PROXIMA']);
 const NOTIFICATION_STATES = Object.freeze(['NO_LEIDA', 'LEIDA']);
 const NOTIFICATION_PRIORITIES = Object.freeze(['BAJA', 'NORMAL', 'ALTA']);
-const NOTIFICATION_ENTITIES = Object.freeze(['DERIVACION_WHATSAPP', 'RESPUESTA_RECEPCION_WHATSAPP']);
+const NOTIFICATION_ENTITIES = Object.freeze(['DERIVACION_WHATSAPP', 'RESPUESTA_RECEPCION_WHATSAPP', 'CITA_AGENDA']);
 
 const InternalNotification = sequelize.define('InternalNotification', {
   id: { type: DataTypes.BIGINT, primaryKey: true, autoIncrement: true },
