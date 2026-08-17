@@ -10,7 +10,7 @@ const IntervencionClinica = sequelize.define(
     tono: DataTypes.TEXT,
     goniometria_balance_articular: DataTypes.TEXT,
     balance_muscular: DataTypes.TEXT,
-    trofismo: { type: DataTypes.STRING(20), validate: { isIn: [['CONSERVADO', 'DISMINUIDO', 'AUMENTADO']] } },
+    trofismo: { type: DataTypes.STRING(20), validate: { isIn: [['CONSERVADO', 'DISMINUIDO', 'AUMENTADO', 'ALTERADO']] } },
     detalle_trofismo: DataTypes.TEXT,
     observaciones: DataTypes.TEXT
   },
