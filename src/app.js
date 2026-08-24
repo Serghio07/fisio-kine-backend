@@ -102,6 +102,8 @@ app.use('/api/personal', personalRoutes);
 app.use('/api/planillas-personal', planillaPersonalRoutes);
 app.use('/api/tareas-personal', tareaPersonalRoutes);
 app.use('/api/documentos-clinicos', documentoClinicoRoutes);
+app.use('/api/public/blog', publicBlogRoutes);
+app.use('/api/public/galeria', publicGaleriaRoutes);
 app.use('/api', adjuntoHistoriaClinicaRoutes);
 app.use('/api/actividades', actividadRoutes);
 app.use('/api/planilla-pagos', planillaPagosRoutes);
@@ -112,9 +114,7 @@ app.use('/api/asistente', assistantRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/blog-categories', blogCategoryRoutes);
-app.use('/api/public/blog', publicBlogRoutes);
 app.use('/api/galeria', galeriaRoutes);
-app.use('/api/public/galeria', publicGaleriaRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

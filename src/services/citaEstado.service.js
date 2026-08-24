@@ -25,8 +25,8 @@ const actualizarCitasNoAsistidas = async (transaction = null, {
           {
             fecha: fechaActual,
             [Op.or]: [
-              { hora_fin: { [Op.lt]: horaActual } },
-              { hora_fin: null, hora_inicio: { [Op.lt]: horaActual } }
+              { hora_fin: { [Op.lte]: horaActual } },
+              { hora_fin: null, hora_inicio: { [Op.lte]: horaActual } }
             ]
           }
         ]
