@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const config = require('../../src/config/whatsapp');
 const {
   appointmentInstant, boliviaDate, buildReminderKey, classifyError,
-  findAppointmentsDueForReminder, processOneClaimedReminder,
+  findAppointmentsDueForReminder, createDueReminderRecords, processOneClaimedReminder,
   processDueAppointmentReminders
 } = require('../../src/services/appointmentReminder.service');
 const { sendTemplateMessage } = require('../../src/services/whatsapp.service');
@@ -39,7 +39,38 @@ test('solo selecciona citas futuras elegibles con telefono normalizado', async (
   ];
   const model = { findAll: async (query) => { assert.ok(query.where.estado); return rows; } };
   const found = await findAppointmentsDueForReminder({ now: new Date('2026-08-04T14:00:00Z'), appointmentModel: model });
-  assert.deepEqual(found.map((item) => item.id), [1]);
+  assert.deepEqual(found.map((item) => item.id), [1, 2]);
+});
+
+test('crea snapshots independientes para dos hermanos con el mismo tutor', async () => {
+  const rows = [
+    { id: 10, paciente_id: 2, fecha: '2026-08-05', hora_inicio: '10:00:00', estado: 'Programada', paciente: { id: 2 } },
+    { id: 11, paciente_id: 3, fecha: '2026-08-05', hora_inicio: '10:10:00', estado: 'Programada', paciente: { id: 3 } }
+  ];
+  const created = [];
+  const recipientResolver = async () => ({ contactId: 9, normalizedPhone: '59177712345', source: 'CONTACTO', relationship: 'PADRE', recipientName: 'Juan Perez' });
+  await createDueReminderRecords({ now: new Date('2026-08-04T14:00:00Z'), appointmentModel: { findAll: async () => rows }, reminderModel: { findOrCreate: async ({ defaults }) => { created.push(defaults); return [defaults, true]; } }, recipientResolver });
+  assert.deepEqual(created.map(({ cita_id, paciente_id, contacto_id, telefono_normalizado }) => ({ cita_id, paciente_id, contacto_id, telefono_normalizado })), [
+    { cita_id: 10, paciente_id: 2, contacto_id: 9, telefono_normalizado: '59177712345' },
+    { cita_id: 11, paciente_id: 3, contacto_id: 9, telefono_normalizado: '59177712345' }
+  ]);
+  assert.notEqual(created[0].idempotency_key, created[1].idempotency_key);
+});
+
+test('crea SIN_DESTINATARIO sin teléfono y continúa con el lote', async () => {
+  const rows = [
+    { id: 12, paciente_id: 4, fecha: '2026-08-05', hora_inicio: '10:00:00', estado: 'Programada', paciente: { id: 4 } },
+    { id: 13, paciente_id: 5, fecha: '2026-08-05', hora_inicio: '10:10:00', estado: 'Programada', paciente: { id: 5 } }
+  ];
+  const created = [];
+  const recipientResolver = async (patient) => patient.id === 4
+    ? { normalizedPhone: null, source: 'CONTACTO', reason: 'WHATSAPP_NO_AUTORIZADO' }
+    : { normalizedPhone: '59160000000', source: 'PACIENTE', recipientName: 'Ana' };
+  await createDueReminderRecords({ now: new Date('2026-08-04T14:00:00Z'), appointmentModel: { findAll: async () => rows }, reminderModel: { findOrCreate: async ({ defaults }) => { created.push(defaults); return [defaults, true]; } }, recipientResolver });
+  assert.equal(created[0].estado, 'SIN_DESTINATARIO');
+  assert.equal(created[0].telefono_normalizado, null);
+  assert.equal(created[0].error_codigo, 'WHATSAPP_NO_AUTORIZADO');
+  assert.equal(created[1].estado, 'PENDIENTE');
 });
 
 test('clasifica fallos transitorios y permanentes', () => {
@@ -74,4 +105,29 @@ test('plantilla ausente bloquea el envio antes de llamar Meta', { concurrency: f
   assert.equal(reminder.estado, 'FALLIDO');
   assert.equal(reminder.error_codigo, 'TEMPLATE_NOT_CONFIGURED');
   assert.equal(sent, 0);
+}));
+
+test('recordatorio de tutor menciona al menor y no abre conversación automática', { concurrency: false }, async () => withEnv({
+  WHATSAPP_REMINDER_TEMPLATE_NAME: 'recordatorio_cita', WHATSAPP_REMINDER_TEMPLATE_LANGUAGE: 'es'
+}, async () => {
+  let parameters; let conversations = 0;
+  const reminder = {
+    id: 81, cita_id: 71, paciente_id: 35, contacto_id: 9, telefono_fuente: 'CONTACTO',
+    telefono_normalizado: '59177712345', cita_fecha: '2026-08-06', cita_hora_inicio: '10:00:00', intentos: 1,
+    async update(value) { Object.assign(this, value); }
+  };
+  const patient = { id: 35, nombres: 'Pedro Perez', estado: true, registro_pendiente: false };
+  const appointment = { id: 71, paciente_id: 35, fecha: '2026-08-06', hora_inicio: '10:00:00', hora_fin: '11:00:00', estado: 'Programada', paciente: patient };
+  const result = await processOneClaimedReminder({
+    reminder, now: new Date('2026-08-04T14:00:00Z'), appointmentModel: { findByPk: async () => appointment }, patientModel: {},
+    sender: async (phone, template, values) => { parameters = { phone, template, values }; return { success: true, messageId: 'wamid.tutor' }; },
+    reminderModel: { findByPk: async () => reminder },
+    conversationModel: { findOne: async () => { conversations += 1; return null; }, create: async () => { conversations += 1; } },
+    eventModel: { create: async () => ({}) }, db: { transaction: async (callback) => callback({ LOCK: { UPDATE: 'UPDATE' } }) }
+  });
+  assert.equal(result, 'accepted');
+  assert.equal(parameters.phone, '59177712345');
+  assert.equal(parameters.values[0], 'Pedro');
+  assert.equal(conversations, 0);
+  assert.ok(reminder.expira_respuesta_en instanceof Date);
 }));

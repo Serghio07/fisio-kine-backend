@@ -9,14 +9,18 @@ const Paciente = sequelize.define(
     nombres: { type: DataTypes.STRING(150), allowNull: false },
     apellidos: { type: DataTypes.STRING(150), allowNull: false },
     ci: { type: DataTypes.STRING(30), allowNull: true, unique: true },
+    tipo_documento: DataTypes.STRING(30),
+    numero_documento: DataTypes.STRING(50),
+    numero_documento_normalizado: DataTypes.STRING(50),
+    nombre_documento_otro: DataTypes.STRING(100),
     fecha_nacimiento: DataTypes.DATEONLY,
     lugar_nacimiento: DataTypes.STRING(150),
     edad: DataTypes.INTEGER,
     sexo: { type: DataTypes.STRING(10), allowNull: true, validate: { isIn: [['MASCULINO', 'FEMENINO']] } },
-    telefono: { type: DataTypes.STRING(30), allowNull: false },
+    telefono: { type: DataTypes.STRING(30), allowNull: true },
     telefono_normalizado: {
       type: DataTypes.STRING(15),
-      allowNull: false,
+      allowNull: true,
       unique: 'pacientes_telefono_normalizado_unique',
       validate: { is: /^\d{7,15}$/ }
     },
@@ -36,7 +40,7 @@ const Paciente = sequelize.define(
     hooks: {
       beforeValidate: (paciente) => {
         if (paciente.changed('telefono') || !paciente.telefono_normalizado) {
-          paciente.telefono_normalizado = normalizePhoneNumber(paciente.telefono);
+          paciente.telefono_normalizado = normalizePhoneNumber(paciente.telefono) || null;
         }
       }
     }
@@ -47,6 +51,7 @@ const pacienteToJSON = Paciente.prototype.toJSON;
 Paciente.prototype.toJSON = function toJSON() {
   const value = pacienteToJSON.call(this);
   delete value.telefono_normalizado;
+  delete value.numero_documento_normalizado;
   return value;
 };
 

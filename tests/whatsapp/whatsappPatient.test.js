@@ -6,6 +6,7 @@ const {
   buildPhoneCandidates,
   sanitizeFirstName,
   findPatientsByWhatsappPhone,
+  resolveWhatsappIdentityByPhone,
   identifyWhatsappContact
 } = require('../../src/services/whatsappPatient.service');
 
@@ -38,7 +39,7 @@ test('la consulta selecciona campos minimos, activos y limita ambiguedad', async
   };
   const rows = await findPatientsByWhatsappPhone('+591 622-95637', patientModel);
   assert.equal(rows.length, 1);
-  assert.deepEqual(queryOptions.attributes, ['id', 'nombres', 'estado']);
+  assert.deepEqual(queryOptions.attributes, ['id', 'nombres', 'apellidos', 'estado']);
   assert.equal(queryOptions.where.telefono_normalizado, '59162295637');
   assert.equal(queryOptions.limit, 3);
   assert.equal(queryOptions.raw, true);
@@ -48,11 +49,10 @@ test('clasifica paciente existente y no devuelve el modelo completo', async () =
   const result = await identifyWhatsappContact('59162295637', {
     patientModel: { findAll: async () => [{ id: 15, nombres: '  Sergio Alberto  ', estado: true, diagnostico: 'privado' }] }
   });
-  assert.deepEqual(result, {
-    type: CONTACT_TYPES.EXISTING,
-    found: true,
-    patient: { id: 15, firstName: 'Sergio', displayName: 'Sergio' }
-  });
+  assert.equal(result.type, CONTACT_TYPES.EXISTING);
+  assert.equal(result.patient.id, 15);
+  assert.equal(result.patient.firstName, 'Sergio');
+  assert.equal(result.options.length, 1);
   assert.equal(JSON.stringify(result).includes('diagnostico'), false);
 });
 
@@ -76,13 +76,34 @@ test('clasifica nuevo, ambiguo e invalido', async () => {
       { id: 2, nombres: 'Eva', estado: true }
     ] }
   });
-  assert.equal(ambiguo.type, CONTACT_TYPES.INTEGRITY_ERROR);
+  assert.equal(ambiguo.type, CONTACT_TYPES.EXISTING);
+  assert.equal(ambiguo.requiresSelection, true);
+  assert.equal(ambiguo.options.length, 2);
   assert.equal(ambiguo.patient, null);
 
   const invalido = await identifyWhatsappContact(null, {
     patientModel: { findAll: async () => assert.fail('no debe consultar') }
   });
   assert.equal(invalido.type, CONTACT_TYPES.INVALID_PHONE);
+});
+
+test('resuelve contactos compartidos, permisos y consolida pacientes', async () => {
+  let relationWhere;
+  const result = await resolveWhatsappIdentityByPhone('77712345', {
+    patientModel: { findAll: async () => [{ id: 20, nombres: 'Juan', apellidos: 'Perez' }] },
+    contactModel: { findAll: async () => [{ id: 9, nombres: 'Juan' }, { id: 10, nombres: 'Ana' }] },
+    relationModel: { findAll: async (query) => { relationWhere = query.where; return [
+      { contacto_id: 9, parentesco: 'PADRE', paciente: { id: 35, nombres: 'Pedro', apellidos: 'Perez' } },
+      { contacto_id: 10, parentesco: 'MADRE', paciente: { id: 35, nombres: 'Pedro', apellidos: 'Perez' } },
+      { contacto_id: 10, parentesco: 'MADRE', paciente: { id: 36, nombres: 'Maria', apellidos: 'Perez' } }
+    ]; } }
+  });
+  assert.equal(result.contactId, null);
+  assert.deepEqual(result.patientOptions.map((item) => item.patientId), [20, 35, 36]);
+  assert.equal(relationWhere.autoriza_whatsapp, true);
+  assert.equal(relationWhere.puede_gestionar_citas, true);
+  assert.equal(relationWhere.estado, true);
+  assert.equal(relationWhere.fecha_fin, null);
 });
 
 test('la unicidad incluye pacientes inactivos', async () => {

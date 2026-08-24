@@ -336,7 +336,7 @@ const processAppointmentStep = async ({ conversation, message, requestModel, tra
       created = await requestModel.create({
       telefono: conversation.telefono,
       nombre_whatsapp: conversation.tipo_contacto === CONTACT_TYPES.NEW ? request.contact_name : null,
-      paciente_id: conversation.tipo_contacto === CONTACT_TYPES.EXISTING ? conversation.paciente_id : null,
+      paciente_id: conversation.tipo_contacto === CONTACT_TYPES.EXISTING ? (conversation.paciente_contexto_id ?? conversation.paciente_id) : null,
       cita_id: null,
       tipo_solicitud: 'AGENDAR',
       estado: 'PENDIENTE_CONFIRMACION',

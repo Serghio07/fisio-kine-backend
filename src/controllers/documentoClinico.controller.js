@@ -1,6 +1,8 @@
 const { Op } = require('sequelize');
+const { cleanDocumentText, normalizeDocumentType, patientDocumentLabel } = require('../utils/patientDocument');
 const { FINANCIAL_KEYS } = require('../middlewares/financialAccess.middleware');
 const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
+const { enrichRecordsWithAdministrativePhone, patientDtoWithAdministrativePhone } = require('../services/patientAdministrativeContact.service');
 const {
   sequelize,
   DocumentoClinico,
@@ -79,6 +81,9 @@ const limpiarDatosConsentimiento = (datos = {}) => ({
   nombre_completo: datos.nombre_completo || '',
   edad: datos.edad || '',
   ci: datos.ci || '',
+  tipo_documento: normalizeDocumentType(datos.tipo_documento) || (datos.ci ? 'CI' : null),
+  numero_documento: cleanDocumentText(datos.numero_documento) || cleanDocumentText(datos.ci) || '',
+  nombre_documento_otro: normalizeDocumentType(datos.tipo_documento) === 'OTRO' ? cleanDocumentText(datos.nombre_documento_otro) || '' : '',
   celular: datos.celular || '',
   tutor_nombre: datos.tutor_nombre || '',
   diagnostico: datos.diagnostico || '',
@@ -152,7 +157,8 @@ const validarDocumento = (body) => {
 
   if (tipo === 'consentimiento') {
     if (!body.datos?.edad) return 'La edad es obligatoria.';
-    if (!body.datos?.ci) return 'El CI es obligatorio.';
+    if (!(body.datos?.numero_documento || body.datos?.ci)) return 'El documento de identidad es obligatorio.';
+    if ((body.datos?.tipo_documento || (body.datos?.ci ? 'CI' : null)) === 'OTRO' && !body.datos?.nombre_documento_otro) return 'El nombre del documento es obligatorio.';
     if (!body.datos?.diagnostico) return 'El diagnostico es obligatorio.';
     if (!body.datos?.tratamiento) return 'El tratamiento es obligatorio.';
     if (Number(body.datos?.edad || 0) < 18 && !body.datos?.tutor_nombre) {
@@ -162,12 +168,6 @@ const validarDocumento = (body) => {
 
   if (tipo === 'signos_vitales') {
     if (!body.datos?.responsable_nombre) return 'El responsable es obligatorio.';
-    const etapas = ['pre', 'durante', 'post'];
-    const tieneSignos = etapas.some((etapa) => {
-      const data = body.datos?.[etapa] || {};
-      return data.presion_arterial || data.frecuencia_cardiaca || data.frecuencia_respiratoria || data.spo2;
-    });
-    if (!tieneSignos) return 'Registra al menos una etapa de signos vitales.';
   }
 
   if (tipo === 'farmacos') {
@@ -230,7 +230,7 @@ const listarDocumentos = async (req, res, next) => {
       include: includeDocumento,
       order: [['fecha', 'DESC'], ['id', 'DESC']]
     });
-    return res.json(documentos);
+    return res.json(await enrichRecordsWithAdministrativePhone(documentos));
   } catch (error) {
     return next(error);
   }
@@ -240,7 +240,7 @@ const obtenerDocumento = async (req, res, next) => {
   try {
     const documento = await DocumentoClinico.findByPk(req.params.id, { include: includeDocumento });
     if (!documento || documento.eliminado) return res.status(404).json({ message: 'Documento no encontrado' });
-    return res.json(documento);
+    return res.json(await enrichRecordsWithAdministrativePhone(documento));
   } catch (error) {
     return next(error);
   }
@@ -288,8 +288,10 @@ const autocompletarPaciente = async (req, res, next) => {
       antecedentes?.farmacologicos ? antecedentes.detalle_farmacologicos || 'Farmacologicos' : ''
     ].filter(Boolean).join(', ');
 
+    const pacienteDto = await patientDtoWithAdministrativePhone(paciente);
+    const responsable = pacienteDto.responsable_principal;
     return res.json({
-      paciente,
+      paciente: pacienteDto,
       historia,
       sesiones,
       documentos,
@@ -298,7 +300,16 @@ const autocompletarPaciente = async (req, res, next) => {
         nombre_completo: `${paciente.nombres || ''} ${paciente.apellidos || ''}`.trim(),
         edad: paciente.edad || '',
         ci: paciente.ci || '',
-        celular: paciente.telefono || '',
+        tipo_documento: paciente.tipo_documento || (paciente.ci ? 'CI' : null),
+        numero_documento: paciente.numero_documento || paciente.ci || '',
+        nombre_documento_otro: paciente.nombre_documento_otro || '',
+        documento: patientDocumentLabel(paciente),
+        celular: pacienteDto.telefono_administrativo || pacienteDto.telefono || '',
+        telefono_fuente: pacienteDto.telefono_fuente,
+        tutor_nombre: responsable ? `${responsable.nombres || ''} ${responsable.apellidos || ''}`.trim() : '',
+        tutor_parentesco: responsable?.parentesco_otro || responsable?.parentesco || '',
+        tutor_tipo_documento: responsable?.tipo_documento || '',
+        tutor_numero_documento: responsable?.numero_documento || '',
         diagnostico: historia?.diagnostico_medico || paciente.referencia || '',
         tratamiento: historia?.evaluacion_final?.plan_tratamiento || '',
         antecedentes_patologicos: antecedentesPatologicos || antecedentes?.observaciones || '',
@@ -342,7 +353,7 @@ const crearDocumento = async (req, res, next) => {
     await transaction.commit();
 
     const completo = await DocumentoClinico.findByPk(documento.id, { include: includeDocumento });
-    return res.status(201).json(completo);
+    return res.status(201).json(await enrichRecordsWithAdministrativePhone(completo));
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
     return next(error);
@@ -385,7 +396,7 @@ const actualizarDocumento = async (req, res, next) => {
     await transaction.commit();
 
     const completo = await DocumentoClinico.findByPk(documento.id, { include: includeDocumento });
-    return res.json(completo);
+    return res.json(await enrichRecordsWithAdministrativePhone(completo));
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
     return next(error);

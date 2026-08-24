@@ -1,5 +1,6 @@
 const { ActividadSistema } = require('../models');
 const { boliviaDateTime } = require('../utils/boliviaDateTime');
+const { patientDocumentLabel } = require('../utils/patientDocument');
 
 const modulos = {
   pacientes: 'Paciente',
@@ -61,7 +62,7 @@ const limpiarDatos = (input, depth = 0, visited = new WeakSet()) => {
 const detalleActividad = (modulo, accion, body) => {
   const nombrePaciente = [body.nombres, body.apellidos].filter(Boolean).join(' ');
   const detalles = {
-    Paciente: nombrePaciente ? `${accion} al paciente ${nombrePaciente}${body.ci ? ` (CI: ${body.ci})` : ''}` : `${accion} un paciente`,
+    Paciente: nombrePaciente ? `${accion} al paciente ${nombrePaciente}${patientDocumentLabel(body) ? ` (Documento: ${patientDocumentLabel(body)})` : ''}` : `${accion} un paciente`,
     'Historia clínica': `${accion} una historia clínica${body.diagnostico_medico ? `: ${body.diagnostico_medico}` : ''}`,
     Sesión: `${accion} una sesión${body.asistencia ? ` con asistencia "${body.asistencia}"` : ''}${body.observacion ? `: ${body.observacion}` : ''}`,
     Cita: `${accion} una cita${body.tipo_atencion ? ` de ${body.tipo_atencion}` : ''}${body.motivo ? `: ${body.motivo}` : ''}`,

@@ -5,6 +5,7 @@ const { sincronizarSemana } = require('../services/sesionSemanalSync.service');
 const { sincronizarConceptoSesion } = require('../services/planillaPagosSync.service');
 const { findAndLockAppointmentForSession, syncAppointmentFromSession } = require('../services/citaSesionLink.service');
 const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
+const { enrichRecordsWithAdministrativePhone } = require('../services/patientAdministrativeContact.service');
 
 const includeSesion = [
   { model: Paciente, as: 'paciente' },
@@ -60,6 +61,8 @@ const normalizarFarmacos = (body) => {
     via: String(farmaco.via === 'Otra' ? farmaco.via_otro || '' : farmaco.via || '').trim(),
     tipo_via: farmaco.via === 'Otra' ? 'Otra' : farmaco.via,
     cantidad: Number(farmaco.cantidad),
+    precio_unitario: toMoney(farmaco.precio_unitario),
+    subtotal: toMoney(farmaco.cantidad) * toMoney(farmaco.precio_unitario),
     motivo_clinico: String(farmaco.motivo_clinico || farmaco.motivo || '').trim(),
     observacion: String(farmaco.observacion || '').trim(),
     estado: 'activo',
@@ -138,7 +141,7 @@ const validarSesion = (body) => {
   if (body.estado_pago === 'Sin costo' && !String(body.motivo_sin_costo || '').trim()) return 'El motivo es requerido para una sesión sin costo';
   if (body.aplica_farmacos) {
     if (body.asistencia !== 'asistio') return 'No se pueden administrar fármacos si el paciente no asistió';
-    if (!String(body.descripcion_tratamiento || '').trim() || !String(body.evolucion_observada || body.observacion || '').trim() || body.dolor_despues === null || body.dolor_despues === '') {
+    if (!String(body.descripcion_tratamiento || '').trim() || body.dolor_despues === null || body.dolor_despues === '') {
       return 'Primero registre la evolución clínica del paciente antes de administrar fármacos';
     }
     const farmacos = Array.isArray(body.farmacos) ? body.farmacos : [];
@@ -147,8 +150,11 @@ const validarSesion = (body) => {
       const nombre = String(farmaco.nombre === 'Otro' ? farmaco.nombre_otro || '' : farmaco.nombre || '').trim();
       const dosis = String(farmaco.presentacion_dosis || farmaco.dosis || '').trim();
       const via = String(farmaco.via === 'Otra' ? farmaco.via_otro || '' : farmaco.via || '').trim();
-      if (!nombre || !dosis || !via || !(Number(farmaco.cantidad) > 0) || !String(farmaco.motivo_clinico || farmaco.motivo || '').trim()) {
-        return 'Cada fármaco debe tener nombre, dosis, vía, cantidad mayor a cero y motivo clínico';
+      if (!nombre || !dosis || !via || !(Number(farmaco.cantidad) > 0)) {
+        return 'Cada fármaco debe tener nombre, dosis, vía y cantidad mayor a cero';
+      }
+      if (farmaco.precio_unitario !== '' && farmaco.precio_unitario != null && (!Number.isFinite(Number(farmaco.precio_unitario)) || Number(farmaco.precio_unitario) < 0)) {
+        return 'El precio unitario de cada fármaco debe ser un número mayor o igual a cero';
       }
     }
   }
@@ -195,6 +201,8 @@ const sincronizarDocumentoFarmacos = async (sesion, historia, transaction) => {
       dosis: farmaco.presentacion_dosis,
       volumen: farmaco.presentacion_dosis,
       cantidad: farmaco.cantidad,
+      precio_unitario: farmaco.precio_unitario,
+      subtotal: farmaco.subtotal,
       via: farmaco.via,
       motivo_clinico: farmaco.motivo_clinico,
       observacion: farmaco.observacion
@@ -433,10 +441,11 @@ const listarSesiones = async (req, res, next) => {
     porHistoria.forEach((items) => items
       .sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')) || Number(a.id) - Number(b.id))
       .forEach((sesion, index) => numeroPorId.set(String(sesion.id), index + 1)));
-    return res.json(sesiones.map((sesion) => ({
+    const normalized = sesiones.map((sesion) => ({
       ...sesion.toJSON(),
       numero_sesion: numeroPorId.get(String(sesion.id)) || sesion.numero_sesion
-    })));
+    }));
+    return res.json(await enrichRecordsWithAdministrativePhone(normalized));
   } catch (error) {
     return next(error);
   }
@@ -446,7 +455,7 @@ const obtenerSesion = async (req, res, next) => {
   try {
     const sesion = await Sesion.findByPk(req.params.id, { include: includeSesion });
     if (!sesion) return res.status(404).json({ message: 'Sesion no encontrada' });
-    return res.json(sesion);
+    return res.json(await enrichRecordsWithAdministrativePhone(sesion));
   } catch (error) {
     return next(error);
   }
@@ -542,10 +551,10 @@ const crearSesion = async (req, res, next) => {
     await sincronizarFechas(fechasAfectadas, transaction);
     const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includeSesion, transaction });
     await transaction.commit();
-    return res.status(201).json({
+    return res.status(201).json(await enrichRecordsWithAdministrativePhone({
       ...sesionCompleta.toJSON(),
       sincronizacion_semanal: true
-    });
+    }));
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
     return next(error);
@@ -596,7 +605,9 @@ const actualizarSesion = async (req, res, next) => {
     }
     await sesion.reload({ transaction });
     if (req.usuario.rol === 'admin') {
-      await sincronizarConceptoSesion(sesion, transaction);
+      // Si el pago fue registrado desde Sesiones, la planilla debe recibir el
+      // movimiento que lo respalda. El servicio evita duplicarlo cuando ya existe.
+      await sincronizarConceptoSesion(sesion, transaction, { importarPago: true });
     }
     await recalcularCadenaDolor(payload.historia_clinica_id, transaction);
     if (String(origen.historia_clinica_id) !== String(payload.historia_clinica_id)) {
@@ -607,10 +618,10 @@ const actualizarSesion = async (req, res, next) => {
     await sincronizarDocumentoFarmacos(sesion, historiaFarmacos, transaction);
     const sesionCompleta = await Sesion.findByPk(sesion.id, { include: includeSesion, transaction });
     await transaction.commit();
-    return res.json({
+    return res.json(await enrichRecordsWithAdministrativePhone({
       ...sesionCompleta.toJSON(),
       sincronizacion_semanal: true
-    });
+    }));
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
     return next(error);

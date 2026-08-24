@@ -6,6 +6,8 @@ const {
   HistoriaClinica,
   MovimientoPago,
   Paciente,
+  Contacto,
+  PacienteContacto,
   Sesion,
   Usuario,
   WhatsappReceptionReferral,
@@ -14,14 +16,25 @@ const {
 const { validarImagen } = require('../utils/imagen');
 const { boliviaDate } = require('../utils/boliviaDateTime');
 const { normalizePhoneNumber } = require('../utils/phone');
+const {
+  DOCUMENT_TYPES,
+  DOCUMENT_NUMBER_PATTERN,
+  cleanDocumentText,
+  normalizePatientDocument,
+  normalizeDocumentType
+} = require('../utils/patientDocument');
 const appointmentAvailability = require('../services/appointmentAvailability.service');
 const { syncAppointmentById } = require('../services/googleCalendarSync.service');
+const contactoService = require('../services/contacto.service');
+const pacienteContactoService = require('../services/pacienteContacto.service');
+const { isMinorByBirthDate, resolveAdministrativePhone, patientDtoWithAdministrativePhone, patientDtosWithAdministrativePhone } = require('../services/patientAdministrativeContact.service');
 
 const PHONE_DUPLICATE_MESSAGE = 'Ya existe un paciente registrado con este número de teléfono.';
 const PHONE_INVALID_MESSAGE = 'El número de teléfono no es válido.';
 
 const camposPaciente = [
-  'nombres', 'apellidos', 'ci', 'fecha_nacimiento', 'lugar_nacimiento',
+  'nombres', 'apellidos', 'ci', 'tipo_documento', 'numero_documento', 'nombre_documento_otro',
+  'fecha_nacimiento', 'lugar_nacimiento',
   'sexo', 'telefono', 'foto', 'peso', 'talla', 'domicilio',
   'estado_civil', 'ocupacion', 'referencia'
 ];
@@ -64,8 +77,19 @@ const normalizarPaciente = (body) => {
   ['ci', 'telefono'].forEach((campo) => {
     if (Object.prototype.hasOwnProperty.call(data, campo)) data[campo] = textoLimpio(data[campo]);
   });
+  const hasDocumentInput = ['tipo_documento', 'numero_documento', 'nombre_documento_otro']
+    .some((campo) => Object.prototype.hasOwnProperty.call(body, campo));
+  if (hasDocumentInput || Object.prototype.hasOwnProperty.call(body, 'ci')) {
+    const tipo = normalizeDocumentType(data.tipo_documento) || (!hasDocumentInput && data.ci ? 'CI' : null);
+    const numero = cleanDocumentText(data.numero_documento) || (tipo === 'CI' ? cleanDocumentText(data.ci) : null);
+    data.tipo_documento = tipo;
+    data.numero_documento = numero;
+    data.numero_documento_normalizado = normalizePatientDocument(numero);
+    data.nombre_documento_otro = tipo === 'OTRO' ? cleanDocumentText(data.nombre_documento_otro) : null;
+    data.ci = tipo === 'CI' ? numero : null;
+  }
   if (Object.prototype.hasOwnProperty.call(data, 'telefono')) {
-    data.telefono_normalizado = normalizePhoneNumber(data.telefono);
+    data.telefono_normalizado = normalizePhoneNumber(data.telefono) || null;
   }
 
   if (Object.prototype.hasOwnProperty.call(data, 'sexo')) {
@@ -88,16 +112,25 @@ const normalizarPaciente = (body) => {
   return data;
 };
 
-const validarPaciente = (data) => {
+const validarPaciente = (data, { hasAdministrativeContact = false } = {}) => {
+  const tipoDocumento = data.tipo_documento || (data.ci ? 'CI' : null);
+  const numeroDocumento = data.numero_documento || data.ci;
   if (!data.nombres) return 'Los nombres son obligatorios.';
   if (!data.apellidos) return 'Los apellidos son obligatorios.';
-  if (!data.ci) return 'El CI es obligatorio.';
-  if (!data.telefono) return 'El teléfono es obligatorio.';
+  if (!tipoDocumento) return 'El tipo de documento es obligatorio.';
+  if (!DOCUMENT_TYPES.includes(tipoDocumento)) return 'El tipo de documento no es válido.';
+  if (!numeroDocumento) return 'El número de documento es obligatorio.';
+  const isMinor = isMinorByBirthDate(data.fecha_nacimiento);
+  if (!data.telefono && !isMinor) return 'El teléfono es obligatorio para pacientes adultos.';
+  if (isMinor && !hasAdministrativeContact) return 'Debe seleccionar un responsable principal para el paciente menor.';
   if (!data.sexo) return 'El sexo es obligatorio.';
   if (!/^[A-ZÁÉÍÓÚÜÑ' -]+$/iu.test(data.nombres)) return 'Los nombres no pueden contener números.';
   if (!/^[A-ZÁÉÍÓÚÜÑ' -]+$/iu.test(data.apellidos)) return 'Los apellidos no pueden contener números.';
-  if (!/^\d+$/.test(data.ci)) return 'El CI solo puede contener números.';
-  if (!normalizePhoneNumber(data.telefono)) return PHONE_INVALID_MESSAGE;
+  if (numeroDocumento.length > 50 || !DOCUMENT_NUMBER_PATTERN.test(numeroDocumento)) return 'El número de documento contiene caracteres no válidos.';
+  if (tipoDocumento === 'CI' && !/^\d+$/.test(numeroDocumento)) return 'El CI solo puede contener números.';
+  if (tipoDocumento === 'OTRO' && !data.nombre_documento_otro) return 'El nombre del documento es obligatorio cuando el tipo es OTRO.';
+  if (data.nombre_documento_otro && data.nombre_documento_otro.length > 100) return 'El nombre del documento no puede superar 100 caracteres.';
+  if (data.telefono && !normalizePhoneNumber(data.telefono)) return PHONE_INVALID_MESSAGE;
   if (!['MASCULINO', 'FEMENINO'].includes(data.sexo)) return 'Selecciona MASCULINO o FEMENINO.';
   if (data.fecha_nacimiento && data.fecha_nacimiento > boliviaDate()) return 'La fecha de nacimiento no puede ser futura.';
   if (data.peso !== null && data.peso !== undefined && (!Number.isFinite(data.peso) || data.peso <= 0)) return 'El peso debe ser mayor que cero.';
@@ -106,12 +139,21 @@ const validarPaciente = (data) => {
 };
 
 const validarCiUnico = async (ci, id = null) => {
+  if (!ci) return true;
   const where = { ci };
   if (id) where.id = { [Op.ne]: id };
   return !(await Paciente.findOne({ where, attributes: ['id'] }));
 };
 
+const validarDocumentoUnico = async (tipoDocumento, numeroNormalizado, id = null) => {
+  if (!tipoDocumento || !numeroNormalizado) return true;
+  const where = { tipo_documento: tipoDocumento, numero_documento_normalizado: numeroNormalizado };
+  if (id) where.id = { [Op.ne]: id };
+  return !(await Paciente.findOne({ where, attributes: ['id'] }));
+};
+
 const validarTelefonoUnico = async (telefonoNormalizado, id = null) => {
+  if (!telefonoNormalizado) return true;
   const where = { telefono_normalizado: telefonoNormalizado };
   if (id) where.id = { [Op.ne]: id };
   return !(await Paciente.findOne({ where, attributes: ['id'] }));
@@ -121,6 +163,33 @@ const isPhoneUniqueConstraintError = (error) => {
   if (error?.name !== 'SequelizeUniqueConstraintError') return false;
   if (error?.fields?.telefono_normalizado !== undefined) return true;
   return String(error?.parent?.constraint || error?.constraint || '').includes('telefono_normalizado');
+};
+
+const isDocumentUniqueConstraintError = (error) => error?.name === 'SequelizeUniqueConstraintError'
+  && String(error?.parent?.constraint || error?.constraint || '').includes('documento');
+
+const findAdministrativePatientIdsByPhone = async (search, { relationModel = PacienteContacto, contactModel = Contacto } = {}) => {
+  const normalizedPhone = normalizePhoneNumber(search);
+  if (!normalizedPhone) return [];
+  const rows = await relationModel.findAll({
+    where: { estado: true, fecha_fin: null, es_contacto_principal: true },
+    attributes: ['paciente_id'],
+    include: [{
+      model: contactModel,
+      as: 'contacto',
+      required: true,
+      attributes: [],
+      where: {
+        estado: true,
+        [Op.or]: [
+          { telefono: { [Op.iLike]: `%${search}%` } },
+          { telefono_normalizado: { [Op.iLike]: `%${normalizedPhone}%` } }
+        ]
+      }
+    }],
+    raw: true
+  });
+  return [...new Set(rows.map((item) => Number(item.paciente_id)).filter(Number.isInteger))];
 };
 
 const listarPacientes = async (req, res, next) => {
@@ -140,10 +209,17 @@ const listarPacientes = async (req, res, next) => {
       if (estado === 'inactive') where.estado = false;
       if (['MASCULINO', 'FEMENINO'].includes(sexo)) where.sexo = sexo;
       if (search) {
+        const normalizedPhone = normalizePhoneNumber(search);
+        const administrativePatientIds = await findAdministrativePatientIdsByPhone(search);
         where[Op.or] = [
           { nombres: { [Op.iLike]: `%${search}%` } },
           { apellidos: { [Op.iLike]: `%${search}%` } },
           { ci: { [Op.iLike]: `%${search}%` } },
+          { numero_documento: { [Op.iLike]: `%${search}%` } },
+          { numero_documento_normalizado: { [Op.iLike]: `%${normalizePatientDocument(search)}%` } },
+          { telefono: { [Op.iLike]: `%${search}%` } },
+          ...(normalizedPhone ? [{ telefono_normalizado: { [Op.iLike]: `%${normalizedPhone}%` } }] : []),
+          ...(administrativePatientIds.length ? [{ id: { [Op.in]: administrativePatientIds } }] : []),
           Paciente.sequelize.where(
             Paciente.sequelize.fn(
               'concat',
@@ -159,7 +235,7 @@ const listarPacientes = async (req, res, next) => {
       const [{ rows, count }, activos, inactivos] = await Promise.all([
         Paciente.findAndCountAll({
           where,
-          attributes: ['id', 'nombres', 'apellidos', 'ci', 'telefono', 'foto', 'edad', 'sexo', 'estado'],
+          attributes: ['id', 'nombres', 'apellidos', 'ci', 'tipo_documento', 'numero_documento', 'nombre_documento_otro', 'fecha_nacimiento', 'telefono', 'foto', 'edad', 'sexo', 'estado'],
           order: [['id', 'DESC']],
           limit,
           offset: (page - 1) * limit
@@ -168,7 +244,7 @@ const listarPacientes = async (req, res, next) => {
         Paciente.count({ where: { estado: false, registro_pendiente: false } })
       ]);
       return res.json({
-        items: rows,
+        items: await patientDtosWithAdministrativePhone(rows),
         total: count,
         summary: { total: activos + inactivos, active: activos, inactive: inactivos },
         page,
@@ -178,7 +254,7 @@ const listarPacientes = async (req, res, next) => {
     }
 
     const pacientes = await Paciente.findAll({ order: [['id', 'DESC']], limit: 500 });
-    return res.json(pacientes);
+    return res.json(await patientDtosWithAdministrativePhone(pacientes));
   } catch (error) {
     return next(error);
   }
@@ -201,14 +277,16 @@ const listarPendientesWhatsapp = async (_req, res, next) => {
 
 const validarDuplicados = async (req, res, next) => {
   try {
-    const ci = textoLimpio(req.query.ci);
+    const tipoDocumento = normalizeDocumentType(req.query.tipo_documento) || (req.query.ci ? 'CI' : null);
+    const numeroDocumento = cleanDocumentText(req.query.numero_documento) || cleanDocumentText(req.query.ci);
+    const numeroNormalizado = normalizePatientDocument(numeroDocumento);
     const excludeId = Number.parseInt(req.query.excludeId, 10) || null;
-    if (!ci) return res.status(400).json({ message: 'El CI es obligatorio.' });
+    if (!tipoDocumento || !numeroNormalizado) return res.status(400).json({ message: 'El documento es obligatorio.' });
 
     const excludeWhere = excludeId ? { id: { [Op.ne]: excludeId } } : {};
     const exacto = await Paciente.findOne({
-      where: { ...excludeWhere, ci },
-      attributes: ['id', 'nombres', 'apellidos', 'ci', 'telefono', 'estado']
+      where: { ...excludeWhere, tipo_documento: tipoDocumento, numero_documento_normalizado: numeroNormalizado },
+      attributes: ['id', 'nombres', 'apellidos', 'ci', 'tipo_documento', 'numero_documento', 'nombre_documento_otro', 'telefono', 'estado']
     });
 
     const posibles = [];
@@ -241,7 +319,7 @@ const validarDuplicados = async (req, res, next) => {
           ...(exacto ? { id: { [Op.notIn]: [exacto.id, ...(excludeId ? [excludeId] : [])] } } : {}),
           [Op.or]: condiciones
         },
-        attributes: ['id', 'nombres', 'apellidos', 'ci', 'telefono', 'estado'],
+        attributes: ['id', 'nombres', 'apellidos', 'ci', 'tipo_documento', 'numero_documento', 'nombre_documento_otro', 'telefono', 'estado'],
         order: [['id', 'DESC']],
         limit: 5
       }));
@@ -257,7 +335,7 @@ const obtenerPaciente = async (req, res, next) => {
   try {
     const paciente = await Paciente.findByPk(req.params.id);
     if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado.' });
-    return res.json(paciente);
+    return res.json(await patientDtoWithAdministrativePhone(paciente));
   } catch (error) {
     return next(error);
   }
@@ -356,9 +434,15 @@ const crearPaciente = async (req, res, next) => {
   try {
     const data = normalizarPaciente(req.body);
     const referralId = Number.parseInt(req.body.whatsapp_derivacion_id, 10) || null;
-    const errorValidacion = validarPaciente(data);
+    let hasAdministrativeContact = false;
+    if (referralId && isMinorByBirthDate(data.fecha_nacimiento)) {
+      const pendingReferral = await WhatsappReceptionReferral.findByPk(referralId, { attributes: ['paciente_id'] });
+      hasAdministrativeContact = Boolean(pendingReferral?.paciente_id && await resolveAdministrativePhone(pendingReferral.paciente_id));
+    }
+    const errorValidacion = validarPaciente(data, { hasAdministrativeContact });
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
-    if (!(await validarCiUnico(data.ci))) return res.status(409).json({ message: 'Ya existe un paciente registrado con ese CI.' });
+    if (!(await validarDocumentoUnico(data.tipo_documento, data.numero_documento_normalizado))) return res.status(409).json({ message: 'Ya existe un paciente registrado con ese documento.' });
+    if (!(await validarCiUnico(data.ci))) return res.status(409).json({ message: 'Ya existe un paciente registrado con ese documento.' });
     if (!referralId && !(await validarTelefonoUnico(data.telefono_normalizado))) {
       return res.status(409).json({ message: PHONE_DUPLICATE_MESSAGE });
     }
@@ -392,6 +476,62 @@ const crearPaciente = async (req, res, next) => {
     return res.status(201).json(result.paciente);
   } catch (error) {
     if (error.status) return res.status(error.status).json({ message: error.message });
+    if (isDocumentUniqueConstraintError(error)) return res.status(409).json({ message: 'Ya existe un paciente registrado con ese documento.' });
+    if (isPhoneUniqueConstraintError(error)) return res.status(409).json({ message: PHONE_DUPLICATE_MESSAGE });
+    return next(error);
+  }
+};
+
+const crearPacienteConContactos = async (req, res, next) => {
+  try {
+    const patientBody = req.body.paciente || {};
+    const contacts = Array.isArray(req.body.contactos) ? req.body.contactos : [];
+    const data = normalizarPaciente(patientBody);
+    const isMinor = isMinorByBirthDate(data.fecha_nacimiento);
+    const result = await Paciente.sequelize.transaction(async (transaction) => {
+      let principalProvided = false;
+      let validPrincipal = false;
+      for (const item of contacts) {
+        const relation = item.relacion || item;
+        if (!relation.es_contacto_principal) continue;
+        principalProvided = true;
+        if (item.contacto_id) {
+          const existing = await Contacto.findByPk(Number(item.contacto_id), { transaction });
+          validPrincipal = Boolean(existing?.estado && normalizePhoneNumber(existing.telefono));
+        } else if (item.contacto) {
+          validPrincipal = Boolean(normalizePhoneNumber(item.contacto.telefono));
+        }
+        if (validPrincipal) break;
+      }
+      if (isMinor && !principalProvided) throw Object.assign(new Error('Debe seleccionar un responsable principal para el paciente menor.'), { status: 400 });
+      if (isMinor && !validPrincipal) throw Object.assign(new Error('El responsable principal debe tener un teléfono válido.'), { status: 400 });
+      const validationError = validarPaciente(data, { hasAdministrativeContact: validPrincipal });
+      if (validationError) throw Object.assign(new Error(validationError), { status: 400 });
+      if (!(await validarDocumentoUnico(data.tipo_documento, data.numero_documento_normalizado))) throw Object.assign(new Error('Ya existe un paciente registrado con ese documento.'), { status: 409 });
+      if (!(await validarCiUnico(data.ci))) throw Object.assign(new Error('Ya existe un paciente registrado con ese documento.'), { status: 409 });
+      if (!(await validarTelefonoUnico(data.telefono_normalizado))) throw Object.assign(new Error(PHONE_DUPLICATE_MESSAGE), { status: 409 });
+      const imageError = validarImagen(data.foto);
+      if (imageError) throw Object.assign(new Error(imageError), { status: 400 });
+
+      const patient = await Paciente.create({ ...data, estado: true }, { transaction });
+      for (const item of contacts) {
+        const relationBody = item.relacion || item;
+        let contactId = Number(item.contacto_id) || null;
+        if (!contactId) {
+          if (!item.contacto) throw Object.assign(new Error('Los datos del responsable son obligatorios.'), { status: 400 });
+          const contact = await contactoService.create({ body: item.contacto, userId: req.usuario.id, transaction });
+          contactId = contact.id;
+        }
+        await pacienteContactoService.create({ patientId: patient.id, contactId, body: relationBody, userId: req.usuario.id, transaction });
+      }
+      const administrative = await resolveAdministrativePhone(patient, { transaction });
+      if (isMinor && !administrative) throw Object.assign(new Error('El responsable principal debe tener un teléfono válido.'), { status: 400 });
+      return patient;
+    });
+    return res.status(201).json(await patientDtoWithAdministrativePhone(result));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ message: error.message });
+    if (isDocumentUniqueConstraintError(error)) return res.status(409).json({ message: 'Ya existe un paciente registrado con ese documento.' });
     if (isPhoneUniqueConstraintError(error)) return res.status(409).json({ message: PHONE_DUPLICATE_MESSAGE });
     return next(error);
   }
@@ -403,10 +543,13 @@ const actualizarPaciente = async (req, res, next) => {
     if (!paciente) return res.status(404).json({ message: 'Paciente no encontrado.' });
     const data = normalizarPaciente(req.body);
     const completo = { ...paciente.toJSON(), ...data };
-    const errorValidacion = validarPaciente(completo);
+    const isMinor = isMinorByBirthDate(completo.fecha_nacimiento);
+    const administrative = isMinor ? await resolveAdministrativePhone({ ...completo, id: paciente.id }) : null;
+    const errorValidacion = validarPaciente(completo, { hasAdministrativeContact: Boolean(administrative) });
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
-    if (!(await validarCiUnico(completo.ci, paciente.id))) return res.status(409).json({ message: 'Ya existe un paciente registrado con ese CI.' });
-    const telefonoNormalizado = normalizePhoneNumber(completo.telefono);
+    if (!(await validarDocumentoUnico(completo.tipo_documento, completo.numero_documento_normalizado, paciente.id))) return res.status(409).json({ message: 'Ya existe un paciente registrado con ese documento.' });
+    if (!(await validarCiUnico(completo.ci, paciente.id))) return res.status(409).json({ message: 'Ya existe un paciente registrado con ese documento.' });
+    const telefonoNormalizado = normalizePhoneNumber(completo.telefono) || null;
     data.telefono_normalizado = telefonoNormalizado;
     if (!(await validarTelefonoUnico(telefonoNormalizado, paciente.id))) {
       return res.status(409).json({ message: PHONE_DUPLICATE_MESSAGE });
@@ -415,8 +558,9 @@ const actualizarPaciente = async (req, res, next) => {
     if (errorImagen) return res.status(400).json({ message: errorImagen });
 
     await paciente.update(data);
-    return res.json(paciente);
+    return res.json(await patientDtoWithAdministrativePhone(paciente));
   } catch (error) {
+    if (isDocumentUniqueConstraintError(error)) return res.status(409).json({ message: 'Ya existe un paciente registrado con ese documento.' });
     if (isPhoneUniqueConstraintError(error)) return res.status(409).json({ message: PHONE_DUPLICATE_MESSAGE });
     return next(error);
   }
@@ -453,11 +597,14 @@ module.exports = {
   obtenerPaciente,
   obtenerSeccionPaciente,
   crearPaciente,
+  crearPacienteConContactos,
   actualizarPaciente,
   eliminarPaciente,
   reactivarPaciente,
   normalizarPaciente,
   validarPaciente,
+  findAdministrativePatientIdsByPhone,
+  validarDocumentoUnico,
   validarTelefonoUnico,
   isPhoneUniqueConstraintError,
   PHONE_DUPLICATE_MESSAGE,

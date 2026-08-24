@@ -126,7 +126,7 @@ test('creacion guarda telefono normalizado y no lo expone en la respuesta', asyn
 test('creacion rechaza telefono equivalente de cualquier paciente con 409', async () => {
   const original = Paciente.findOne;
   let calls = 0;
-  Paciente.findOne = async () => (++calls === 1 ? null : { id: 99, estado: false });
+  Paciente.findOne = async (options) => options.where.telefono_normalizado ? { id: 99, estado: false } : null;
   const res = responseDouble();
   try {
     await crearPaciente({ body: { ...validBody, telefono: '+591 62295637' } }, res, assert.fail);

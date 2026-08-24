@@ -53,11 +53,12 @@ const buildListMessage = (conversation, appointments, mode) => {
 };
 
 const showList = async ({ conversation, mode, appointmentModel, transaction, activity, now }) => {
-  if (conversation.tipo_contacto !== CONTACT_TYPES.EXISTING || !conversation.paciente_id) return { responseText: 'No encontramos un registro de paciente asociado a este número.\n\nPara consultar, cancelar o reprogramar una cita, comunícate con recepción para verificar tus datos.', responseKind: 'MANAGEMENT_NOT_PATIENT', conversationStep: conversation.paso_actual };
+  const patientContextId = conversation.paciente_contexto_id ?? conversation.paciente_id;
+  if (conversation.tipo_contacto !== CONTACT_TYPES.EXISTING || !patientContextId) return { responseText: 'No encontramos un registro de paciente asociado a este número.\n\nPara consultar, cancelar o reprogramar una cita, comunícate con recepción para verificar tus datos.', responseKind: 'MANAGEMENT_NOT_PATIENT', conversationStep: conversation.paso_actual };
   console.info('[WhatsApp] Consultando próximas citas');
   let appointments;
   try {
-    appointments = await getUpcomingAppointmentsForPatient({ patientId: conversation.paciente_id, now, appointmentModel, transaction });
+    appointments = await getUpcomingAppointmentsForPatient({ patientId: patientContextId, now, appointmentModel, transaction });
   } catch (cause) {
     console.error('[WhatsApp] Error al consultar citas');
     const error = new Error('No fue posible consultar citas por WhatsApp');
@@ -78,7 +79,7 @@ const showList = async ({ conversation, mode, appointmentModel, transaction, act
   return { responseText: buildListMessage(conversation, appointments, mode), responseKind: appointments.length ? 'APPOINTMENT_LIST' : 'NO_UPCOMING_APPOINTMENTS', conversationStep: CONVERSATION_STEPS.WAITING_APPOINTMENT_SELECTION };
 };
 
-const loadOwned = async ({ conversation, appointmentId, appointmentModel, transaction, lock = false }) => appointmentModel.findOne({ where: { id: appointmentId, paciente_id: conversation.paciente_id }, transaction, ...(lock ? { lock: transaction.LOCK?.UPDATE } : {}) });
+const loadOwned = async ({ conversation, appointmentId, appointmentModel, transaction, lock = false }) => appointmentModel.findOne({ where: { id: appointmentId, paciente_id: conversation.paciente_contexto_id ?? conversation.paciente_id }, transaction, ...(lock ? { lock: transaction.LOCK?.UPDATE } : {}) });
 const minimalDetail = (appointment, manage, name = '') => `${manage ? '¿Qué deseas hacer con esta cita?' : `${name ? `${name}, esta es tu próxima cita` : 'Esta es tu próxima cita'} 😊`}\n\n📅 ${humanDate(appointment.fecha)}\n🕘 ${slotText(appointment)}${manage ? '\n\n1. Reprogramar\n2. Cancelar\n3. Elegir otra cita\n4. Volver al menú' : `\n📌 Estado: ${appointment.estado}\n\n1. Ver otra cita\n2. Volver al menú`}`;
 const cancellationSummary = (_conversation, appointment) => `¿Seguro que deseas cancelar esta cita?\n\n📅 ${humanDate(appointment.fecha)}\n🕘 ${slotText(appointment)}\n\n1. Sí, cancelar\n2. No, mantenerla`;
 const rescheduleDatePrompt = 'Indica la nueva fecha que prefieres para tu cita.\n\nPuedes escribir, por ejemplo:\n\n- 08/08/2026\n- mañana\n- próximo lunes\n\nNo se modificará la cita hasta que confirmes el nuevo horario.\n\nEscribe CANCELAR para abandonar la reprogramación.';
@@ -101,7 +102,8 @@ const processManagementStep = async ({ conversation, message, appointmentModel =
   const step = conversation.paso_actual;
   const choice = normalize(message);
   if ([CONVERSATION_STEPS.START_APPOINTMENTS, CONVERSATION_STEPS.START_RESCHEDULE_CANCEL].includes(step)) {
-    const patient = conversation.paciente_id ? await patientModel.findByPk(conversation.paciente_id, { attributes: ['id', 'estado', 'registro_pendiente'], transaction }) : null;
+    const patientContextId = conversation.paciente_contexto_id ?? conversation.paciente_id;
+    const patient = patientContextId ? await patientModel.findByPk(patientContextId, { attributes: ['id', 'estado', 'registro_pendiente'], transaction }) : null;
     if (!patient || patient.estado !== true || patient.registro_pendiente === true) return { responseText: 'No encontramos un registro de paciente asociado a este número.\n\nPara consultar, cancelar o reprogramar una cita, comunícate con recepción para verificar tus datos.', responseKind: 'MANAGEMENT_NOT_PATIENT', conversationStep: step };
     return showList({ conversation, mode: step === CONVERSATION_STEPS.START_APPOINTMENTS ? 'CONSULT' : 'MANAGE', appointmentModel, transaction, activity, now });
   }

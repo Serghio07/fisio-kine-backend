@@ -7,7 +7,7 @@ const {
 } = require('../../src/services/appointmentAvailability.service');
 const config = require('../../src/config/whatsapp');
 const { Cita } = require('../../src/models');
-const { validarSolapamiento } = require('../../src/controllers/cita.controller');
+const { validarSolapamiento, validarSolapamientoProgramaciones } = require('../../src/controllers/cita.controller');
 
 test('configuracion de disponibilidad usa valores seguros', () => {
   const saved = { ...process.env };
@@ -65,6 +65,18 @@ test('detecta todos los solapamientos y permite adyacencia', () => {
     { hora_inicio: '09:00', hora_fin: '12:00' }, { hora_inicio: '10:30', hora_fin: null }
   ]) assert.equal(isSlotOverlapping(slot, item), true);
   assert.equal(isSlotOverlapping(slot, { hora_inicio: '11:30', hora_fin: '12:00' }), false);
+});
+
+test('programación por lote rechaza sesiones superpuestas del mismo paciente', () => {
+  assert.match(validarSolapamientoProgramaciones([
+    { numero_sesion: 1, fecha: '2026-08-21', hora_inicio: '09:00', hora_fin: '10:00' },
+    { numero_sesion: 2, fecha: '2026-08-21', hora_inicio: '09:00', hora_fin: '10:00' }
+  ]), /sesiones 1 y 2/u);
+  assert.equal(validarSolapamientoProgramaciones([
+    { numero_sesion: 1, fecha: '2026-08-21', hora_inicio: '09:00', hora_fin: '10:00' },
+    { numero_sesion: 2, fecha: '2026-08-21', hora_inicio: '10:00', hora_fin: '11:00' },
+    { numero_sesion: 3, fecha: '2026-08-22', hora_inicio: '09:00', hora_fin: '10:00' }
+  ]), null);
 });
 
 test('estados bloqueantes son una fuente central estricta', () => {

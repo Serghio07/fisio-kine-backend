@@ -28,7 +28,7 @@ const run = (active, message, extra = {}) => {
     create: async (data) => { const item = conversation(data); created.push(item); return item; }
   };
   return processConversationMessage({
-    phone: '59160000000', message, isText: true,
+    phone: '59160000000', message, isText: true, replyToMessageId: extra.replyToMessageId,
     identificationResponse: () => 'error'
   }, {
     conversationModel: model, sequelize: fakeDb, useAdvisoryLock: false,
@@ -37,6 +37,7 @@ const run = (active, message, extra = {}) => {
     appointmentModel: extra.appointmentModel || { findAll: async () => [], findOne: async () => null },
     availabilityService: extra.availabilityService,
     referralModel: extra.referralModel || { findOne: async () => null, create: async (data) => ({ id: 1, ...data }) },
+    reminderModel: extra.reminderModel || { findAll: async () => [], findOne: async () => null, findByPk: async () => null },
     timeoutMinutes: 30, now: '2026-08-04T14:00:00Z',
     identifyWhatsappContact: extra.identify || (async () => ({
       type: CONTACT_TYPES.EXISTING, found: true,
@@ -52,6 +53,39 @@ test('normaliza opciones explicitas y rechaza entradas ambiguas', () => {
   for (const value of ['', '1 o 2', 'fecha 1/2', '60000000', 'quiero una cita mañana']) {
     assert.deepEqual(normalizeMenuOption(value), { valid: false, option: null });
   }
+});
+
+test('respuesta citada selecciona el paciente y la cita del recordatorio', async () => {
+  const reminder = { id: 81, cita_id: 71, paciente_id: 35, contacto_id: 9, telefono_normalizado: '59160000000', meta_message_id: 'wamid.pedro', estado: 'ACEPTADO', cita_fecha: '2026-08-06', cita_hora_inicio: '10:00', expira_respuesta_en: new Date('2026-08-04T15:00:00Z'), async update(data) { Object.assign(this, data); } };
+  const appointment = { id: 71, paciente_id: 35, fecha: '2026-08-06', hora_inicio: '10:00:00', hora_fin: '11:00:00', estado: 'Programada', updated_at: new Date(), async update(data) { Object.assign(this, data); } };
+  const { result, created } = await run(null, '1', {
+    replyToMessageId: 'wamid.pedro',
+    identify: async () => ({ type: CONTACT_TYPES.EXISTING, contactId: 9, options: [
+      { patientId: 35, displayName: 'Pedro Perez', firstName: 'Pedro', source: 'CONTACTO', contactId: 9, relationship: 'PADRE' }
+    ] }),
+    reminderModel: { findOne: async () => reminder, findByPk: async () => reminder },
+    appointmentModel: { findOne: async ({ where }) => { assert.equal(where.paciente_id, 35); return appointment; } }
+  });
+  assert.equal(result.responseKind, 'ATTENDANCE_CONFIRMED');
+  assert.equal(created[0].paciente_contexto_id, 35);
+  assert.equal(created[0].contacto_id, 9);
+  assert.equal(created[0].contexto_origen, 'RECORDATORIO_REFERENCIADO');
+});
+
+test('dos recordatorios sin referencia exigen aclaración y procesan solo el elegido', async () => {
+  const reminders = [
+    { id: 81, cita_id: 71, paciente_id: 35, contacto_id: 9, telefono_normalizado: '59160000000', estado: 'ACEPTADO', cita_fecha: '2026-08-06', cita_hora_inicio: '10:00', expira_respuesta_en: new Date('2026-08-04T15:00:00Z') },
+    { id: 82, cita_id: 72, paciente_id: 36, contacto_id: 9, telefono_normalizado: '59160000000', estado: 'ACEPTADO', cita_fecha: '2026-08-06', cita_hora_inicio: '11:00', expira_respuesta_en: new Date('2026-08-04T15:00:00Z'), async update(data) { Object.assign(this, data); } }
+  ];
+  const reminderModel = { findAll: async () => reminders, findByPk: async (id) => reminders.find((item) => item.id === id) };
+  const first = await run(null, 'sí', { reminderModel, patientModel: { findAll: async () => [{ id: 35, nombres: 'Pedro', apellidos: 'Perez' }, { id: 36, nombres: 'Maria', apellidos: 'Perez' }] } });
+  assert.equal(first.result.responseKind, 'REMINDER_SELECTION_REQUIRED');
+  assert.equal(first.created[0].paso_actual, CONVERSATION_STEPS.WAITING_REMINDER_SELECTION);
+  const appointment = { id: 72, paciente_id: 36, fecha: '2026-08-06', hora_inicio: '11:00:00', hora_fin: '12:00:00', estado: 'Programada', updated_at: new Date(), async update(data) { Object.assign(this, data); } };
+  const second = await run(first.created[0], '2', { reminderModel, identify: async () => ({ type: CONTACT_TYPES.EXISTING, options: [{ patientId: 36 }] }), appointmentModel: { findOne: async ({ where }) => { assert.equal(where.id, 72); return appointment; } } });
+  assert.equal(second.result.responseKind, 'ATTENDANCE_CONFIRMED');
+  assert.equal(reminders[0].estado, 'ACEPTADO');
+  assert.equal(reminders[1].estado, 'RESPONDIDO');
 });
 
 test('normaliza comandos globales sin distinguir mayusculas o tildes', () => {
@@ -90,11 +124,46 @@ test('primer mensaje crea conversacion de paciente con expiracion y menu', async
   assert.equal(created.length, 1);
   assert.equal(created[0].telefono, '59160000000');
   assert.equal(created[0].paciente_id, 5);
+  assert.equal(created[0].paciente_contexto_id, 5);
+  assert.equal(created[0].contexto_estado, 'SELECCIONADO');
+  assert.equal(created[0].contexto_origen, 'AUTO_UNICO');
   assert.equal(created[0].paso_actual, CONVERSATION_STEPS.WAITING_OPTION);
   assert.equal(created[0].tipo_contacto, CONTACT_TYPES.EXISTING);
   assert.equal(created[0].expira_en.toISOString(), '2026-08-04T14:30:00.000Z');
   assert.match(result.responseText, /Hola, Ana/u);
   assert.deepEqual(created[0].contexto.patient_reference, { id: 5, first_name: 'Ana' });
+});
+
+test('varios pacientes requieren selección y una opción válida fija contexto', async () => {
+  const identify = async () => ({ type: CONTACT_TYPES.EXISTING, contactId: 9, options: [
+    { patientId: 20, displayName: 'Juan Perez', firstName: 'Juan', source: 'PACIENTE', contactId: null },
+    { patientId: 35, displayName: 'Pedro Perez', firstName: 'Pedro', source: 'CONTACTO', contactId: 9, relationship: 'PADRE' }
+  ] });
+  const first = await run(null, 'hola', { identify });
+  const active = first.created[0];
+  assert.equal(first.result.responseKind, 'PATIENT_SELECTION_REQUIRED');
+  assert.equal(active.paciente_contexto_id, null);
+  assert.equal(active.paso_actual, CONVERSATION_STEPS.WAITING_PATIENT_SELECTION);
+  const invalid = await run(active, '8', { identify });
+  assert.equal(invalid.result.responseKind, 'INVALID_PATIENT_SELECTION');
+  assert.equal(active.paciente_contexto_id, null);
+  const selected = await run(active, '2', { identify });
+  assert.equal(selected.result.responseKind, 'PATIENT_SELECTED');
+  assert.equal(active.paciente_contexto_id, 35);
+  assert.equal(active.paciente_id, 35);
+  assert.equal(active.contexto_origen, 'SELECCION_USUARIO');
+});
+
+test('cambiar paciente recalcula opciones sin elegir arbitrariamente', async () => {
+  const active = conversation({ paciente_id: 35, paciente_contexto_id: 35, contexto_estado: 'SELECCIONADO' });
+  const identify = async () => ({ type: CONTACT_TYPES.EXISTING, options: [
+    { patientId: 35, displayName: 'Pedro Perez', firstName: 'Pedro', source: 'CONTACTO', contactId: 9 },
+    { patientId: 36, displayName: 'Maria Perez', firstName: 'Maria', source: 'CONTACTO', contactId: 9 }
+  ] });
+  const { result } = await run(active, 'Cambiar paciente', { identify });
+  assert.equal(result.responseKind, 'PATIENT_SELECTION_REQUIRED');
+  assert.equal(active.paciente_contexto_id, null);
+  assert.equal(active.contexto_estado, 'SELECCION_REQUERIDA');
 });
 
 test('paciente existente usa nombre cacheado sin consultar nuevamente', async () => {
@@ -139,7 +208,7 @@ test('menu de paciente aplica las cuatro transiciones', async () => {
 });
 
 test('menu nuevo aplica dos opciones y rechaza las demas', async () => {
-  const expected = [CONVERSATION_STEPS.WAITING_NAME, CONVERSATION_STEPS.RECEPTION];
+  const expected = [CONVERSATION_STEPS.WAITING_PATIENT_TYPE, CONVERSATION_STEPS.RECEPTION];
   for (let option = 1; option <= 2; option += 1) {
     const active = conversation({ tipo_contacto: CONTACT_TYPES.NEW });
     await run(active, String(option));

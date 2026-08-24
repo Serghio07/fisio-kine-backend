@@ -109,6 +109,7 @@ const extractWebhookData = (payload) => {
           contactName: contact?.profile?.name,
           phoneNumberId: value.metadata?.phone_number_id,
           displayPhoneNumber: value.metadata?.display_phone_number,
+          replyToMessageId: typeof message.context?.id === 'string' ? message.context.id : null,
           field: change.field
         });
       }
@@ -254,7 +255,8 @@ const processIncomingMessage = async (message, options) => {
       message: isTextMessage ? message.text : undefined,
       isText: isTextMessage,
       nonTextMessage: NON_TEXT_MESSAGE,
-      identificationResponse: selectContactResponse
+      identificationResponse: selectContactResponse,
+      replyToMessageId: message.replyToMessageId
     }, { identifyWhatsappContact: options.identifyWhatsappContact });
   } catch (_) {
     console.error('[WhatsApp] Error al procesar conversación');

@@ -2,6 +2,8 @@ const sequelize = require('../config/database');
 const GoogleCalendarIntegracion = require('./GoogleCalendarIntegracion');
 const Usuario = require('./Usuario');
 const Paciente = require('./Paciente');
+const { Contacto, CONTACT_DOCUMENT_TYPES } = require('./Contacto');
+const { PacienteContacto, PARENTESCOS_CONTACTO } = require('./PacienteContacto');
 const HistoriaClinica = require('./HistoriaClinica');
 const AntecedentePersonal = require('./AntecedentePersonal');
 const AntecedenteFamiliar = require('./AntecedenteFamiliar');
@@ -9,6 +11,7 @@ const ExamenKinesico = require('./ExamenKinesico');
 const CondicionActual = require('./CondicionActual');
 const IntervencionClinica = require('./IntervencionClinica');
 const EvaluacionFinal = require('./EvaluacionFinal');
+const HistorialAmpliacionSesiones = require('./HistorialAmpliacionSesiones');
 const Sesion = require('./Sesion');
 const InformeMedico = require('./InformeMedico');
 const RegistroSemanal = require('./RegistroSemanal');
@@ -21,11 +24,23 @@ const PlanillaPersonalDetalle = require('./PlanillaPersonalDetalle');
 const TareaPersonal = require('./TareaPersonal');
 const ActividadSistema = require('./ActividadSistema');
 const DocumentoClinico = require('./DocumentoClinico');
+const AdjuntoHistoriaClinica = require('./AdjuntoHistoriaClinica');
 const PagoClinico = require('./PagoClinico');
 const ConceptoCobro = require('./ConceptoCobro');
 const MovimientoPago = require('./MovimientoPago');
+const OperacionPago = require('./OperacionPago');
 const MovimientoPagoAuditoria = require('./MovimientoPagoAuditoria');
 const ArqueoPago = require('./ArqueoPago');
+const ArqueoMovimientoSnapshot = require('./ArqueoMovimientoSnapshot');
+const ArqueoMovimientoCajaSnapshot = require('./ArqueoMovimientoCajaSnapshot');
+const {
+  MovimientoCaja,
+  TIPOS_MOVIMIENTO_CAJA,
+  METODOS_MOVIMIENTO_CAJA,
+  CATEGORIAS_EGRESO,
+  ESTADOS_MOVIMIENTO_CAJA,
+  ORIGENES_MOVIMIENTO_CAJA
+} = require('./MovimientoCaja');
 const ObservacionDiaria = require('./ObservacionDiaria');
 const BlogCategory = require('./BlogCategory');
 const BlogPost = require('./BlogPost');
@@ -57,6 +72,13 @@ const { InternalNotification, NOTIFICATION_TYPES, NOTIFICATION_STATES, NOTIFICAT
 const { WhatsappTechnicalIncident, INCIDENT_TYPES, INCIDENT_SEVERITIES, INCIDENT_STATES } = require('./WhatsappTechnicalIncident');
 const { WhatsappJobExecution, JOB_NAMES, JOB_STATUSES } = require('./WhatsappJobExecution');
 
+Paciente.hasMany(PacienteContacto, { foreignKey: 'paciente_id', as: 'contactos_relacionados', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+PacienteContacto.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+Contacto.hasMany(PacienteContacto, { foreignKey: 'contacto_id', as: 'pacientes_relacionados', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+PacienteContacto.belongsTo(Contacto, { foreignKey: 'contacto_id', as: 'contacto', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+Paciente.hasOne(Contacto, { foreignKey: 'paciente_id', as: 'perfil_contacto', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+Contacto.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente_vinculado', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+
 Paciente.hasMany(HistoriaClinica, { foreignKey: 'paciente_id', as: 'historias_clinicas', onDelete: 'CASCADE' });
 HistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
 
@@ -80,6 +102,12 @@ IntervencionClinica.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_i
 
 HistoriaClinica.hasOne(EvaluacionFinal, { foreignKey: 'historia_clinica_id', as: 'evaluacion_final', onDelete: 'CASCADE' });
 EvaluacionFinal.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id' });
+HistoriaClinica.hasMany(HistorialAmpliacionSesiones, { foreignKey: 'historia_clinica_id', as: 'ampliaciones_sesiones', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+HistorialAmpliacionSesiones.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historia_clinica' });
+EvaluacionFinal.hasMany(HistorialAmpliacionSesiones, { foreignKey: 'evaluacion_final_id', as: 'historial_ampliaciones', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+HistorialAmpliacionSesiones.belongsTo(EvaluacionFinal, { foreignKey: 'evaluacion_final_id', as: 'evaluacion_final' });
+Usuario.hasMany(HistorialAmpliacionSesiones, { foreignKey: 'creado_por_id', as: 'ampliaciones_sesiones_registradas', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+HistorialAmpliacionSesiones.belongsTo(Usuario, { foreignKey: 'creado_por_id', as: 'creado_por' });
 
 Paciente.hasMany(Sesion, { foreignKey: 'paciente_id', as: 'sesiones', onDelete: 'CASCADE' });
 Sesion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -132,10 +160,14 @@ Cita.hasMany(WhatsappEvento, { foreignKey: 'cita_id', as: 'eventos_whatsapp', on
 WhatsappEvento.belongsTo(Cita, { foreignKey: 'cita_id', as: 'cita', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
 Paciente.hasMany(WhatsappConversacion, { foreignKey: 'paciente_id', as: 'conversaciones_whatsapp', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
 WhatsappConversacion.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+WhatsappConversacion.belongsTo(Contacto, { foreignKey: 'contacto_id', as: 'contacto_emisor', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+WhatsappConversacion.belongsTo(Paciente, { foreignKey: 'paciente_contexto_id', as: 'paciente_contexto', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
 Cita.hasMany(WhatsappAppointmentReminder, { foreignKey: 'cita_id', as: 'recordatorios_whatsapp', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
 WhatsappAppointmentReminder.belongsTo(Cita, { foreignKey: 'cita_id', as: 'cita', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
 Paciente.hasMany(WhatsappAppointmentReminder, { foreignKey: 'paciente_id', as: 'recordatorios_whatsapp', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
 WhatsappAppointmentReminder.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+Contacto.hasMany(WhatsappAppointmentReminder, { foreignKey: 'contacto_id', as: 'recordatorios_whatsapp', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+WhatsappAppointmentReminder.belongsTo(Contacto, { foreignKey: 'contacto_id', as: 'contacto_destinatario', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
 Paciente.hasMany(WhatsappReceptionReferral, { foreignKey: 'paciente_id', as: 'derivaciones_whatsapp', onDelete: 'RESTRICT' });
 WhatsappReceptionReferral.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente', onDelete: 'RESTRICT' });
 Cita.hasMany(WhatsappReceptionReferral, { foreignKey: 'cita_id', as: 'derivaciones_whatsapp', onDelete: 'RESTRICT' });
@@ -198,6 +230,17 @@ DocumentoClinico.belongsTo(Usuario, { foreignKey: 'usuario_modificacion_id', as:
 Sesion.hasMany(DocumentoClinico, { foreignKey: 'sesion_id', as: 'documentos_clinicos', onDelete: 'SET NULL' });
 DocumentoClinico.belongsTo(Sesion, { foreignKey: 'sesion_id', as: 'sesion' });
 
+Paciente.hasMany(AdjuntoHistoriaClinica, { foreignKey: 'paciente_id', as: 'adjuntos_historia', onDelete: 'RESTRICT' });
+AdjuntoHistoriaClinica.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+HistoriaClinica.hasMany(AdjuntoHistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'adjuntos', onDelete: 'RESTRICT' });
+AdjuntoHistoriaClinica.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historia_clinica' });
+Sesion.hasMany(AdjuntoHistoriaClinica, { foreignKey: 'sesion_id', as: 'adjuntos_historia', onDelete: 'SET NULL' });
+AdjuntoHistoriaClinica.belongsTo(Sesion, { foreignKey: 'sesion_id', as: 'sesion' });
+Usuario.hasMany(AdjuntoHistoriaClinica, { foreignKey: 'creado_por_id', as: 'adjuntos_historia_creados', onDelete: 'RESTRICT' });
+AdjuntoHistoriaClinica.belongsTo(Usuario, { foreignKey: 'creado_por_id', as: 'creadoPor' });
+Usuario.hasMany(AdjuntoHistoriaClinica, { foreignKey: 'eliminado_por_id', as: 'adjuntos_historia_eliminados', onDelete: 'SET NULL' });
+AdjuntoHistoriaClinica.belongsTo(Usuario, { foreignKey: 'eliminado_por_id', as: 'eliminadoPor' });
+
 Paciente.hasMany(PagoClinico, { foreignKey: 'paciente_id', as: 'pagos_clinicos', onDelete: 'CASCADE' });
 PagoClinico.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
 DocumentoClinico.hasOne(PagoClinico, { foreignKey: 'documento_id', as: 'pago', onDelete: 'CASCADE' });
@@ -216,6 +259,15 @@ ConceptoCobro.hasMany(MovimientoPago, { foreignKey: 'concepto_cobro_id', as: 'mo
 MovimientoPago.belongsTo(ConceptoCobro, { foreignKey: 'concepto_cobro_id', as: 'concepto' });
 Usuario.hasMany(MovimientoPago, { foreignKey: 'usuario_receptor_id', as: 'movimientos_recibidos', onDelete: 'RESTRICT' });
 MovimientoPago.belongsTo(Usuario, { foreignKey: 'usuario_receptor_id', as: 'recibido_por' });
+Paciente.hasMany(OperacionPago, { foreignKey: 'paciente_id', as: 'operaciones_pago', onDelete: 'RESTRICT' });
+OperacionPago.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
+HistoriaClinica.hasMany(OperacionPago, { foreignKey: 'historia_clinica_id', as: 'operaciones_pago', onDelete: 'RESTRICT' });
+OperacionPago.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historia_clinica' });
+Usuario.hasMany(OperacionPago, { foreignKey: 'usuario_receptor_id', as: 'operaciones_pago_recibidas', onDelete: 'RESTRICT' });
+OperacionPago.belongsTo(Usuario, { foreignKey: 'usuario_receptor_id', as: 'recibido_por' });
+OperacionPago.belongsTo(Usuario, { foreignKey: 'anulado_por_id', as: 'anulado_por' });
+OperacionPago.hasMany(MovimientoPago, { foreignKey: 'operacion_pago_id', as: 'aplicaciones', onDelete: 'RESTRICT' });
+MovimientoPago.belongsTo(OperacionPago, { foreignKey: 'operacion_pago_id', as: 'operacion_pago' });
 
 MovimientoPago.hasMany(MovimientoPagoAuditoria, { foreignKey: 'movimiento_pago_id', as: 'historial', onDelete: 'RESTRICT' });
 MovimientoPagoAuditoria.belongsTo(MovimientoPago, { foreignKey: 'movimiento_pago_id', as: 'movimiento' });
@@ -225,6 +277,30 @@ Usuario.hasMany(ArqueoPago, { foreignKey: 'usuario_id', as: 'arqueos_pago', onDe
 ArqueoPago.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'responsable' });
 ArqueoPago.hasMany(MovimientoPago, { foreignKey: 'arqueo_id', as: 'movimientos', onDelete: 'SET NULL' });
 MovimientoPago.belongsTo(ArqueoPago, { foreignKey: 'arqueo_id', as: 'arqueo' });
+ArqueoPago.belongsTo(ArqueoPago, { foreignKey: 'saldo_inicial_origen_arqueo_id', as: 'arqueoOrigenSaldo', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+ArqueoPago.hasMany(ArqueoPago, { foreignKey: 'saldo_inicial_origen_arqueo_id', as: 'arqueosConSaldoArrastrado', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+ArqueoPago.belongsTo(Usuario, { foreignKey: 'saldo_inicial_definido_por_id', as: 'saldoInicialDefinidoPor', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+Usuario.hasMany(ArqueoPago, { foreignKey: 'saldo_inicial_definido_por_id', as: 'saldosInicialesDefinidos', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+ArqueoPago.hasMany(ArqueoMovimientoSnapshot, { foreignKey: 'arqueo_id', as: 'movimientosSnapshot', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+ArqueoMovimientoSnapshot.belongsTo(ArqueoPago, { foreignKey: 'arqueo_id', as: 'arqueo', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+MovimientoPago.hasMany(ArqueoMovimientoSnapshot, { foreignKey: 'movimiento_pago_id', as: 'snapshotsArqueo', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+ArqueoMovimientoSnapshot.belongsTo(MovimientoPago, { foreignKey: 'movimiento_pago_id', as: 'movimientoOriginal', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+Paciente.hasMany(ArqueoMovimientoSnapshot, { foreignKey: 'paciente_id', as: 'snapshotsArqueo', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+ArqueoMovimientoSnapshot.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+HistoriaClinica.hasMany(ArqueoMovimientoSnapshot, { foreignKey: 'historia_clinica_id', as: 'snapshotsArqueo', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+ArqueoMovimientoSnapshot.belongsTo(HistoriaClinica, { foreignKey: 'historia_clinica_id', as: 'historiaClinica', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+Usuario.hasMany(ArqueoMovimientoSnapshot, { foreignKey: 'recibido_por_id', as: 'snapshotsMovimientosRecibidos', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+ArqueoMovimientoSnapshot.belongsTo(Usuario, { foreignKey: 'recibido_por_id', as: 'recibidoPor', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+ArqueoPago.hasMany(ArqueoMovimientoCajaSnapshot, { foreignKey: 'arqueo_id', as: 'movimientosCajaSnapshot', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+ArqueoMovimientoCajaSnapshot.belongsTo(ArqueoPago, { foreignKey: 'arqueo_id', as: 'arqueo', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+ArqueoMovimientoCajaSnapshot.belongsTo(MovimientoCaja, { foreignKey: 'movimiento_caja_id', as: 'movimientoCaja', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+ArqueoMovimientoCajaSnapshot.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'usuario', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+MovimientoCaja.belongsTo(Usuario, { foreignKey: 'usuario_id', as: 'registradoPor', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+Usuario.hasMany(MovimientoCaja, { foreignKey: 'usuario_id', as: 'movimientosCajaRegistrados', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+MovimientoCaja.belongsTo(ArqueoPago, { foreignKey: 'arqueo_id', as: 'arqueo', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+ArqueoPago.hasMany(MovimientoCaja, { foreignKey: 'arqueo_id', as: 'movimientosCaja', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
+MovimientoCaja.belongsTo(Usuario, { foreignKey: 'anulado_por_id', as: 'anuladoPor', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
+Usuario.hasMany(MovimientoCaja, { foreignKey: 'anulado_por_id', as: 'movimientosCajaAnulados', onUpdate: 'CASCADE', onDelete: 'SET NULL' });
 
 Paciente.hasMany(ObservacionDiaria, { foreignKey: 'paciente_id', as: 'observaciones_diarias', onDelete: 'SET NULL' });
 ObservacionDiaria.belongsTo(Paciente, { foreignKey: 'paciente_id', as: 'paciente' });
@@ -250,6 +326,10 @@ module.exports = {
   GoogleCalendarIntegracion,
   Usuario,
   Paciente,
+  Contacto,
+  CONTACT_DOCUMENT_TYPES,
+  PacienteContacto,
+  PARENTESCOS_CONTACTO,
   HistoriaClinica,
   AntecedentePersonal,
   AntecedenteFamiliar,
@@ -257,6 +337,7 @@ module.exports = {
   CondicionActual,
   IntervencionClinica,
   EvaluacionFinal,
+  HistorialAmpliacionSesiones,
   Sesion,
   InformeMedico,
   RegistroSemanal,
@@ -272,11 +353,21 @@ module.exports = {
   TareaPersonal,
   ActividadSistema,
   DocumentoClinico,
+  AdjuntoHistoriaClinica,
   PagoClinico,
   ConceptoCobro,
   MovimientoPago,
+  OperacionPago,
   MovimientoPagoAuditoria,
   ArqueoPago,
+  ArqueoMovimientoSnapshot,
+  ArqueoMovimientoCajaSnapshot,
+  MovimientoCaja,
+  TIPOS_MOVIMIENTO_CAJA,
+  METODOS_MOVIMIENTO_CAJA,
+  CATEGORIAS_EGRESO,
+  ESTADOS_MOVIMIENTO_CAJA,
+  ORIGENES_MOVIMIENTO_CAJA,
   ObservacionDiaria,
   BlogCategory,
   BlogPost,

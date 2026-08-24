@@ -5,6 +5,7 @@ const { CONVERSATION_STATUS, CONVERSATION_STEPS, CONTACT_TYPES } = require('../m
 const { normalizePhoneNumber } = require('../utils/phone');
 const { sanitizeFirstName } = require('./whatsappAppointmentRequest.service');
 const { sendTemplateMessage } = require('./whatsapp.service');
+const { isMinorByBirthDate, resolveReminderRecipient } = require('./patientAdministrativeContact.service');
 const config = require('../config/whatsapp');
 const incidentService=require('./whatsappIncident.service');
 const incidentSafe=(data)=>incidentService.createOrIncrement(data).catch(()=>console.error('[WhatsApp Monitoring] Error procesando monitoreo'));
@@ -30,18 +31,40 @@ const findAppointmentsDueForReminder = async ({ now = new Date(), appointmentMod
   const hours = config.getWhatsappReminderHoursBefore(); const [from, to] = dueWindow(now);
   const appointmentFrom = new Date(from.getTime() + hours * 3600000); const appointmentTo = new Date(to.getTime() + hours * 3600000);
   const dates = [...new Set([boliviaDate(appointmentFrom), boliviaDate(appointmentTo)])];
-  const rows = await appointmentModel.findAll({ attributes: ['id', 'paciente_id', 'fecha', 'hora_inicio', 'hora_fin', 'estado'], where: { fecha: { [Op.in]: dates }, estado: { [Op.in]: ELIGIBLE_STATES } }, include: [{ model: Paciente, as: 'paciente', required: true, attributes: ['id', 'nombres', 'telefono_normalizado', 'estado', 'registro_pendiente'], where: { estado: true } }], transaction });
-  return rows.filter((item) => { const phone = normalizePhoneNumber(item.paciente?.telefono_normalizado); const instant = appointmentInstant(item); const target = new Date(instant.getTime() - hours * 3600000); return phone && instant > now && target >= from && target <= to; });
+  const rows = await appointmentModel.findAll({ attributes: ['id', 'paciente_id', 'fecha', 'hora_inicio', 'hora_fin', 'estado'], where: { fecha: { [Op.in]: dates }, estado: { [Op.in]: ELIGIBLE_STATES } }, include: [{ model: Paciente, as: 'paciente', required: true, attributes: ['id', 'nombres', 'apellidos', 'fecha_nacimiento', 'telefono', 'telefono_normalizado', 'estado', 'registro_pendiente'], where: { estado: true } }], transaction });
+  return rows.filter((item) => { const instant = appointmentInstant(item); const target = new Date(instant.getTime() - hours * 3600000); return instant > now && target >= from && target <= to; });
 };
 
-const createDueReminderRecords = async ({ now = new Date(), appointmentModel = Cita, reminderModel = WhatsappAppointmentReminder, transaction } = {}) => {
+const createDueReminderRecords = async ({ now = new Date(), appointmentModel = Cita, reminderModel = WhatsappAppointmentReminder, recipientResolver = resolveReminderRecipient, transaction } = {}) => {
   console.info('[WhatsApp] Buscando recordatorios pendientes');
   const appointments = await findAppointmentsDueForReminder({ now, appointmentModel, transaction });
   console.info('[WhatsApp] Citas elegibles encontradas');
   const records = [];
   for (const item of appointments) {
     const scheduledAt = new Date(appointmentInstant(item).getTime() - config.getWhatsappReminderHoursBefore() * 3600000);
-    const values = { cita_id: item.id, paciente_id: item.paciente_id, telefono_normalizado: normalizePhoneNumber(item.paciente.telefono_normalizado), programado_para: scheduledAt, cita_fecha: item.fecha, cita_hora_inicio: item.hora_inicio, cita_hora_fin: item.hora_fin, cita_estado: item.estado, estado: 'PENDIENTE', proximo_intento_en: now, idempotency_key: buildReminderKey(item.id, scheduledAt) };
+    let recipient;
+    try { recipient = await recipientResolver(item.paciente, { transaction }); }
+    catch (_) {
+      recipient = { normalizedPhone: null, source: isMinorByBirthDate(item.paciente?.fecha_nacimiento) ? 'CONTACTO' : 'PACIENTE', reason: 'ERROR_RESOLVIENDO_DESTINATARIO' };
+      console.error('[WhatsApp] No se pudo resolver destinatario de recordatorio');
+    }
+    const hasDestination = Boolean(recipient?.normalizedPhone);
+    const values = {
+      cita_id: item.id, paciente_id: item.paciente_id,
+      contacto_id: recipient?.contactId || null,
+      telefono_normalizado: hasDestination ? recipient.normalizedPhone : null,
+      telefono_fuente: recipient?.source || 'PACIENTE',
+      parentesco_snapshot: recipient?.relationship || null,
+      destinatario_nombre_snapshot: recipient?.recipientName || null,
+      programado_para: scheduledAt, cita_fecha: item.fecha, cita_hora_inicio: item.hora_inicio,
+      cita_hora_fin: item.hora_fin, cita_estado: item.estado,
+      estado: hasDestination ? 'PENDIENTE' : 'SIN_DESTINATARIO',
+      proximo_intento_en: hasDestination ? now : null,
+      error_codigo: hasDestination ? null : String(recipient?.reason || 'SIN_DESTINATARIO').slice(0, 100),
+      error_categoria: hasDestination ? null : 'PERMANENTE',
+      error_resumen: hasDestination ? null : 'No existe un destinatario autorizado con teléfono válido',
+      idempotency_key: buildReminderKey(item.id, scheduledAt)
+    };
     const [record] = await reminderModel.findOrCreate({ where: { idempotency_key: values.idempotency_key }, defaults: values, transaction }); records.push(record);
   }
   return records;
@@ -64,9 +87,9 @@ const activateReminderConversation = async ({ reminder, appointment, patient, no
 
 const processOneClaimedReminder = async ({ reminder, now = new Date(), appointmentModel = Cita, patientModel = Paciente, reminderModel = WhatsappAppointmentReminder, conversationModel = WhatsappConversacion, eventModel = WhatsappEvento, sender = sendTemplateMessage, db = sequelize }) => {
   const template = config.getWhatsappReminderTemplate();
-  const appointment = await appointmentModel.findByPk(reminder.cita_id, { include: [{ model: patientModel, as: 'paciente', attributes: ['id', 'nombres', 'telefono_normalizado', 'estado', 'registro_pendiente'] }] });
-  const patient = appointment?.paciente; const validPhone = patient && normalizePhoneNumber(patient.telefono_normalizado) === reminder.telefono_normalizado;
-  if (!appointment || !patient || !validPhone || patient.estado !== true || !ELIGIBLE_STATES.includes(appointment.estado) || appointmentInstant(appointment) <= now || appointment.fecha !== reminder.cita_fecha || String(appointment.hora_inicio).slice(0, 5) !== String(reminder.cita_hora_inicio).slice(0, 5)) {
+  const appointment = await appointmentModel.findByPk(reminder.cita_id, { include: [{ model: patientModel, as: 'paciente', attributes: ['id', 'nombres', 'apellidos', 'estado', 'registro_pendiente'] }] });
+  const patient = appointment?.paciente; const validPhone = Boolean(normalizePhoneNumber(reminder.telefono_normalizado));
+  if (!appointment || !patient || !validPhone || patient.estado !== true || appointment.paciente_id !== reminder.paciente_id || !ELIGIBLE_STATES.includes(appointment.estado) || appointmentInstant(appointment) <= now || appointment.fecha !== reminder.cita_fecha || String(appointment.hora_inicio).slice(0, 5) !== String(reminder.cita_hora_inicio).slice(0, 5)) {
     await reminder.update({ estado: 'CANCELADO', error_codigo: 'APPOINTMENT_NOT_ELIGIBLE', error_categoria: 'PERMANENTE', error_resumen: 'La cita o el paciente dejaron de ser elegibles' }); console.info('[WhatsApp] Recordatorio cancelado por estado de cita'); return 'cancelled';
   }
   if (!template.name || !template.language) { await reminder.update({ estado: 'FALLIDO', error_codigo: 'TEMPLATE_NOT_CONFIGURED', error_categoria: 'PERMANENTE', error_resumen: 'Plantilla de recordatorio no configurada' }); if(reminder.id)await incidentSafe({type:'RECORDATORIO_FALLIDO',severity:'ERROR',entityType:'RECORDATORIO',entityId:reminder.id,reminderId:reminder.id,code:'TEMPLATE_NOT_CONFIGURED',summary:'Plantilla de recordatorio no configurada',category:'PERMANENTE',recoverable:false,attempts:reminder.intentos,idempotencyKey:`reminder-failed:${reminder.id}:TEMPLATE_NOT_CONFIGURED:${reminder.intentos}`}); return 'configuration_error'; }
@@ -74,7 +97,7 @@ const processOneClaimedReminder = async ({ reminder, now = new Date(), appointme
   const name = sanitizeFirstName(patient.nombres) || 'Paciente';
   const result = await sender(reminder.telefono_normalizado, template, [name, humanDate(appointment.fecha), `${String(appointment.hora_inicio).slice(0, 5)}${appointment.hora_fin ? ` a ${String(appointment.hora_fin).slice(0, 5)}` : ''}`]);
   if (result.success) {
-    await db.transaction(async (transaction) => { const locked = await reminderModel.findByPk(reminder.id, { transaction, lock: transaction.LOCK.UPDATE }); const expiry = new Date(now.getTime() + config.getWhatsappReminderResponseTimeoutHours() * 3600000); await locked.update({ estado: 'ACEPTADO', meta_message_id: result.messageId, aceptado_en: now, expira_respuesta_en: expiry, error_codigo: null, error_categoria: null, error_resumen: null }, { transaction }); await activateReminderConversation({ reminder: locked, appointment, patient, now, conversationModel, transaction }); await eventModel.create({ meta_message_id: result.messageId, cita_id: appointment.id, solicitud_id: null, telefono: reminder.telefono_normalizado, direccion: 'SALIENTE', tipo_evento: 'RECORDATORIO_ENVIADO', estado: 'ENVIADO', datos: { reminder_id: Number(reminder.id), template_language: template.language }, enviado_en: now }, { transaction }); });
+    await db.transaction(async (transaction) => { const locked = await reminderModel.findByPk(reminder.id, { transaction, lock: transaction.LOCK.UPDATE }); const conversational = locked.telefono_fuente !== 'CONTACTO'; const expiry = new Date(now.getTime() + config.getWhatsappReminderResponseTimeoutHours() * 3600000); await locked.update({ estado: 'ACEPTADO', meta_message_id: result.messageId, aceptado_en: now, expira_respuesta_en: expiry, error_codigo: null, error_categoria: null, error_resumen: null }, { transaction }); if (conversational) await activateReminderConversation({ reminder: locked, appointment, patient, now, conversationModel, transaction }); await eventModel.create({ meta_message_id: result.messageId, cita_id: appointment.id, solicitud_id: null, telefono: reminder.telefono_normalizado, direccion: 'SALIENTE', tipo_evento: 'RECORDATORIO_ENVIADO', estado: 'ENVIADO', datos: { reminder_id: Number(reminder.id), patient_id: Number(reminder.paciente_id), contact_id: reminder.contacto_id ? Number(reminder.contacto_id) : null, phone_source: reminder.telefono_fuente, template_language: template.language }, enviado_en: now }, { transaction }); });
     await incidentService.markRecovered({type:'RECORDATORIO',entityId:reminder.id}).catch(()=>{}); console.info('[WhatsApp] Recordatorio aceptado por Meta'); return 'accepted';
   }
   const category = classifyError(result); const maxed = Number(reminder.intentos) >= config.getWhatsappReminderMaxAttempts();

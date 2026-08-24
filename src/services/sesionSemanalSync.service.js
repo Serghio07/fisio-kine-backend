@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { HistoriaClinica, Paciente, RegistroSemanal, Sesion } = require('../models');
 const { ensureRegistroSemanalSchema } = require('./registroSemanalSchema.service');
+const { resolveAdministrativePhone } = require('./patientAdministrativeContact.service');
 
 const DAY_NAMES = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
 
@@ -20,6 +21,11 @@ const normalizarSexoRegistro = (sexo) => {
   if (value === 'MASCULINO' || value === 'M') return 'M';
   if (value === 'FEMENINO' || value === 'F') return 'F';
   return sexo ? 'Otro' : null;
+};
+
+const resolveWeeklyAdministrativePhone = async (paciente, { transaction, resolver = resolveAdministrativePhone } = {}) => {
+  const administrative = await resolver(paciente, { transaction });
+  return administrative?.telefono || null;
 };
 
 const obtenerSemana = (fecha) => {
@@ -68,8 +74,7 @@ const construirResumen = (sesiones) => {
   return resumen;
 };
 
-const buscarDatosPaciente = async (pacienteId, historiaClinicaId, transaction) => {
-  const paciente = await Paciente.findByPk(pacienteId, { transaction });
+const buscarHistoriaPaciente = async (pacienteId, historiaClinicaId, transaction) => {
   const historia = historiaClinicaId
     ? await HistoriaClinica.findByPk(historiaClinicaId, { transaction })
     : await HistoriaClinica.findOne({
@@ -77,7 +82,7 @@ const buscarDatosPaciente = async (pacienteId, historiaClinicaId, transaction) =
       order: [['fecha_evaluacion', 'DESC'], ['id', 'DESC']],
       transaction
     });
-  return { paciente, historia };
+  return historia;
 };
 
 const agruparPorHistoria = (sesiones) => sesiones.reduce((groups, sesion) => {
@@ -123,6 +128,8 @@ const sincronizarSemana = async (pacienteId, fecha, transaction) => {
   const historiasActivasConId = historiasActivas.filter((id) => id !== null);
   const permiteHistoriaNula = historiasActivas.includes(null);
   const registros = [];
+  const paciente = await Paciente.findByPk(pacienteId, { transaction });
+  const telefonoAdministrativo = await resolveWeeklyAdministrativePhone(paciente, { transaction });
 
   const staleHistoriaWhere = historiasActivasConId.length
     ? {
@@ -155,7 +162,7 @@ const sincronizarSemana = async (pacienteId, fecha, transaction) => {
       transaction
     });
 
-    const { paciente, historia } = await buscarDatosPaciente(pacienteId, historiaClinicaId, transaction);
+    const historia = await buscarHistoriaPaciente(pacienteId, historiaClinicaId, transaction);
 
     if (!registro) {
       registro = await RegistroSemanal.create({
@@ -172,7 +179,7 @@ const sincronizarSemana = async (pacienteId, fecha, transaction) => {
       historia_clinica_id: historiaClinicaId,
       semana_fin: semana.fin,
       diagnostico: historia?.diagnostico_medico || historia?.motivo_consulta || null,
-      telefono: paciente?.telefono || null,
+      telefono: telefonoAdministrativo,
       edad: paciente?.edad ?? null,
       sexo: normalizarSexoRegistro(paciente?.sexo),
       sesiones_resumen: construirResumen(sesionesHistoria),
@@ -192,5 +199,6 @@ const sincronizarSemana = async (pacienteId, fecha, transaction) => {
 module.exports = {
   construirResumen,
   obtenerSemana,
+  resolveWeeklyAdministrativePhone,
   sincronizarSemana
 };

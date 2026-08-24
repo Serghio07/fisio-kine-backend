@@ -17,10 +17,11 @@ const help = (step) => step === CONVERSATION_STEPS.WAITING_NONATTENDANCE_CONFIRM
 
 const loadContext = async ({ conversation, reminderModel, appointmentModel, transaction, now }) => {
   const reference = conversation.contexto?.appointment_reminder;
-  if (!reference?.reminder_id || !reference?.appointment_id || conversation.tipo_contacto !== CONTACT_TYPES.EXISTING || !conversation.paciente_id) return { error: 'MISSING' };
+  const patientContextId = conversation.paciente_contexto_id ?? conversation.paciente_id;
+  if (!reference?.reminder_id || !reference?.appointment_id || conversation.tipo_contacto !== CONTACT_TYPES.EXISTING || !patientContextId) return { error: 'MISSING' };
   const reminder = await reminderModel.findByPk(reference.reminder_id, { transaction, lock: transaction.LOCK.UPDATE });
-  const appointment = await appointmentModel.findOne({ where: { id: reference.appointment_id, paciente_id: conversation.paciente_id }, transaction, lock: transaction.LOCK.UPDATE });
-  if (!reminder || !appointment || reminder.cita_id !== appointment.id || reminder.paciente_id !== conversation.paciente_id || reminder.telefono_normalizado !== conversation.telefono) return { error: 'MISMATCH' };
+  const appointment = await appointmentModel.findOne({ where: { id: reference.appointment_id, paciente_id: patientContextId }, transaction, lock: transaction.LOCK.UPDATE });
+  if (!reminder || !appointment || reminder.cita_id !== appointment.id || reminder.paciente_id !== patientContextId || reminder.telefono_normalizado !== conversation.telefono) return { error: 'MISMATCH' };
   if (reminder.respondido_en || reminder.estado === 'RESPONDIDO') return { reminder, appointment, error: 'RESPONDED' };
   if (!reminder.expira_respuesta_en || new Date(reminder.expira_respuesta_en) <= now) { await reminder.update({ estado: 'EXPIRADO' }, { transaction }); return { reminder, appointment, error: 'EXPIRED' }; }
   if (!['ACEPTADO', 'ENVIADO', 'ENTREGADO', 'LEIDO'].includes(reminder.estado)) return { reminder, appointment, error: 'INACTIVE' };

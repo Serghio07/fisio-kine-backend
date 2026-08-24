@@ -25,7 +25,26 @@ const ArqueoPago = sequelize.define('ArqueoPago', {
   cerrado_en: DataTypes.DATE,
   reabierto_en: DataTypes.DATE,
   reabierto_por_id: DataTypes.INTEGER,
-  motivo_reapertura: DataTypes.TEXT
+  motivo_reapertura: DataTypes.TEXT,
+  numero_arqueo: { type: DataTypes.STRING(30), allowNull: false, unique: true },
+  fecha_operativa: DataTypes.DATEONLY,
+  saldo_inicial_efectivo: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0, validate: { min: 0 } },
+  saldo_inicial_origen_arqueo_id: DataTypes.INTEGER,
+  saldo_inicial_manual: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  saldo_inicial_definido_por_id: DataTypes.INTEGER,
+  saldo_inicial_definido_en: DataTypes.DATE,
+  efectivo_esperado_cierre: { type: DataTypes.DECIMAL(12, 2), validate: { min: 0 } },
+  otro_sistema: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0, validate: { min: 0 } },
+  otro_confirmado: { type: DataTypes.DECIMAL(12, 2), validate: { min: 0 } },
+  diferencia_efectivo: DataTypes.DECIMAL(12, 2),
+  diferencia_qr: DataTypes.DECIMAL(12, 2),
+  diferencia_transferencia: DataTypes.DECIMAL(12, 2),
+  diferencia_tarjeta: DataTypes.DECIMAL(12, 2),
+  diferencia_otro: DataTypes.DECIMAL(12, 2),
+  monto_retirado: { type: DataTypes.DECIMAL(12, 2), validate: { min: 0 } },
+  saldo_dejado_caja: { type: DataTypes.DECIMAL(12, 2), validate: { min: 0 } },
+  resultado_cierre: { type: DataTypes.STRING(20), validate: { isIn: [['CUADRADO', 'CON_DIFERENCIA']] } },
+  snapshot_resumen: DataTypes.JSONB
 }, { tableName: 'arqueos_pago' });
 
 module.exports = ArqueoPago;

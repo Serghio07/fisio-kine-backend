@@ -76,7 +76,7 @@ const processFinalConfirmation = async ({ conversation, message, requestModel, a
   console.info('[WhatsApp] Confirmación final recibida');
   if (!requestReady(request, now) || !selectedSlotConsistent(request) || !validBusinessRange(request, availability, now)) return { responseText: ERROR_MESSAGE, responseKind: 'FINAL_REQUEST_INVALID', conversationStep: conversation.paso_actual };
 
-  if (conversation.tipo_contacto === CONTACT_TYPES.NEW || !request.paciente_id) {
+  if (!request.paciente_id) {
     await db.query('SELECT pg_advisory_xact_lock(hashtext(:slotKey))', { replacements: { slotKey: `whatsapp-appointment:${request.fecha_solicitada}` }, transaction });
     const free = await availability.revalidateSlotCapacity({ slot: { date: request.fecha_solicitada, start: String(request.hora_inicio).slice(0, 5), end: String(request.hora_fin).slice(0, 5) }, transaction, now, appointmentModel });
     if (!free) return offerAvailability({ conversation, request, transaction, activity, now, availability });
@@ -94,7 +94,7 @@ const processFinalConfirmation = async ({ conversation, message, requestModel, a
   }
 
   const patient = await patientModel.findByPk(request.paciente_id, { transaction, lock: transaction.LOCK?.UPDATE });
-  if (!patient || patient.estado !== true || patient.registro_pendiente === true || conversation.paciente_id !== request.paciente_id || conversation.tipo_contacto !== CONTACT_TYPES.EXISTING) return { responseText: ERROR_MESSAGE, responseKind: 'PATIENT_INVALID', conversationStep: conversation.paso_actual };
+  if (!patient || patient.estado !== true || (conversation.paciente_contexto_id ?? conversation.paciente_id) !== request.paciente_id || conversation.tipo_contacto !== CONTACT_TYPES.EXISTING) return { responseText: ERROR_MESSAGE, responseKind: 'PATIENT_INVALID', conversationStep: conversation.paso_actual };
   await db.query('SELECT pg_advisory_xact_lock(hashtext(:slotKey))', { replacements: { slotKey: `whatsapp-appointment:${request.fecha_solicitada}` }, transaction });
   console.info('[WhatsApp] Revalidando capacidad final');
   const free = await availability.revalidateSlotCapacity({ slot: { date: request.fecha_solicitada, start: String(request.hora_inicio).slice(0, 5), end: String(request.hora_fin).slice(0, 5) }, transaction, now, appointmentModel });

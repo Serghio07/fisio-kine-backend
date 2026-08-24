@@ -6,7 +6,7 @@ const {
   WhatsappConversacion, CONVERSATION_STATUS, CONVERSATION_STEPS, MAIN_OPTIONS, CONTACT_TYPES
 } = require('../models/WhatsappConversacion');
 const { WhatsappSolicitudCita } = require('../models/WhatsappSolicitudCita');
-const { Cita, Paciente, WhatsappAppointmentReminder } = require('../models');
+const { Cita, Paciente, Contacto, PacienteContacto, WhatsappAppointmentReminder } = require('../models');
 const {
   MESSAGES: REQUEST_MESSAGES, appointmentSteps, buildStepHelp, processAppointmentStep, sanitizeFirstName
 } = require('./whatsappAppointmentRequest.service');
@@ -15,6 +15,7 @@ const { availabilitySteps, help: availabilityHelp, offerAvailability, processAva
 const { confirmationSteps, processFinalConfirmation, ERROR_MESSAGE: FINAL_CONFIRMATION_ERROR } = require('./whatsappAppointmentConfirmation.service');
 const { managementSteps, processManagementStep, help: managementHelp, QUERY_ERROR: MANAGEMENT_QUERY_ERROR, UPDATE_ERROR: MANAGEMENT_ERROR } = require('./whatsappAppointmentManagement.service');
 const { reminderSteps, processReminderResponse, help: reminderHelp } = require('./whatsappReminderResponse.service');
+const { steps: newPatientSteps, processNewPatientStep } = require('./whatsappNewPatient.service');
 const { createOrReuseReceptionReferral } = require('./whatsappReceptionReferral.service');
 const { syncAppointmentById } = require('./googleCalendarSync.service');
 
@@ -39,6 +40,12 @@ Qué gusto tenerte nuevamente en Physio Active.
 4. Hablar con recepción
 
 Elige una opción escribiendo su número.`;
+
+const buildPatientSelectionMessage = (options = []) => `¿Para quién desea realizar la gestión?\n\n${options.map((item, index) => `${index + 1}. ${item.displayName}${item.source === 'PACIENTE' ? ' — Yo' : item.relationship ? ` — ${item.relationship}` : ''}`).join('\n')}\n\nResponda con el número.`;
+const safeSelectionOptions = (options = []) => options.map((item) => ({ patientId: Number(item.patientId), displayName: String(item.displayName || '').slice(0, 150), firstName: sanitizeFirstName(item.firstName || item.displayName), source: item.source, contactId: item.contactId ? Number(item.contactId) : null, relationship: item.relationship || null }));
+const selectedContext = (option) => ({ patient_reference: { id: option.patientId, first_name: option.firstName }, selected_patient: option });
+const reminderReplyLike = (value) => /^(?:1|2|3|4|si|sí|confirmar|confirmo|no|reprogramar)$/iu.test(String(value || '').trim());
+const reminderSelectionMessage = (options) => `Encontré más de una cita pendiente. ¿A cuál desea responder?\n\n${options.map((item, index) => `${index + 1}. ${item.patientName} — ${item.date} ${item.time}`).join('\n')}\n\nResponda con el número.`;
 
 const RESPONSES = Object.freeze({
   BOOK_EXISTING: `Perfecto. Iniciaremos el proceso para agendar una cita. 📅
@@ -135,6 +142,7 @@ const normalizeMenuOption = (value) => {
 const normalizeCommand = (value) => {
   if (typeof value !== 'string' || value.length > 30) return '';
   const command = stripAccents(value.trim().toUpperCase());
+  if (command === 'CAMBIAR PACIENTE') return 'CAMBIAR_PACIENTE';
   if (['MENU', 'INICIO', 'REINICIAR', 'CANCELAR', 'SALIR', 'AYUDA'].includes(command)) return command;
   return '';
 };
@@ -155,7 +163,7 @@ const selectionFor = (contactType, option, firstName = '') => {
     4: [CONVERSATION_STEPS.RECEPTION, MAIN_OPTIONS.RECEPTION, RESPONSES.RECEPTION_EXISTING]
   };
   const fresh = {
-    1: [CONVERSATION_STEPS.WAITING_NAME, MAIN_OPTIONS.BOOK, REQUEST_MESSAGES.START_NEW],
+    1: [CONVERSATION_STEPS.WAITING_PATIENT_TYPE, MAIN_OPTIONS.BOOK, '¿La atención es para usted o para otra persona?\n\n1. Para mí\n2. Para otra persona'],
     2: [CONVERSATION_STEPS.RECEPTION, MAIN_OPTIONS.RECEPTION, RESPONSES.RECEPTION_NEW]
   };
   return (contactType === CONTACT_TYPES.EXISTING ? existing : fresh)[option] || null;
@@ -171,6 +179,8 @@ const processConversationMessage = async (input, dependencies = {}) => {
   const availability = dependencies.availabilityService || availabilityDefault;
   const appointmentModel = dependencies.appointmentModel || Cita;
   const patientModel = dependencies.patientModel || Paciente;
+  const contactModel = dependencies.contactModel || Contacto;
+  const relationModel = dependencies.relationModel || PacienteContacto;
   const reminderModel = dependencies.reminderModel || WhatsappAppointmentReminder;
   const referralModel = dependencies.referralModel;
   const timeout = dependencies.timeoutMinutes || getConversationTimeoutMinutes();
@@ -198,29 +208,124 @@ const processConversationMessage = async (input, dependencies = {}) => {
     }
 
     if (!conversation) {
+      const referencedReminder = input.replyToMessageId && typeof reminderModel.findOne === 'function' ? await reminderModel.findOne({ where: { meta_message_id: input.replyToMessageId, telefono_normalizado: phone }, transaction, lock: transaction.LOCK?.UPDATE }) : null;
+      if (referencedReminder && ['ACEPTADO','ENVIADO','ENTREGADO','LEIDO'].includes(referencedReminder.estado) && referencedReminder.expira_respuesta_en && new Date(referencedReminder.expira_respuesta_en) > now) {
+        conversation = await model.create({ telefono: phone, paciente_id: referencedReminder.paciente_id, contacto_id: referencedReminder.contacto_id || null, paciente_contexto_id: referencedReminder.paciente_id, contexto_estado: 'SELECCIONADO', contexto_seleccionado_en: now, contexto_origen: 'RECORDATORIO_REFERENCIADO', tipo_contacto: CONTACT_TYPES.EXISTING, estado: CONVERSATION_STATUS.ACTIVE, paso_actual: CONVERSATION_STEPS.WAITING_REMINDER_RESPONSE, opcion_principal: null, contexto: { patient_reference: { id: referencedReminder.paciente_id, first_name: '' }, appointment_reminder: { reminder_id: referencedReminder.id, appointment_id: referencedReminder.cita_id, replied_to_message_id: input.replyToMessageId } }, ...activity(now, timeout) }, { transaction });
+      }
+    }
+
+    if (!conversation && !input.replyToMessageId && reminderReplyLike(input.message) && typeof reminderModel.findAll === 'function') {
+      const reminders = await reminderModel.findAll({ where: { telefono_normalizado: phone, estado: ['ACEPTADO','ENVIADO','ENTREGADO','LEIDO'] }, transaction, lock: transaction.LOCK?.UPDATE });
+      const valid = reminders.filter((item) => item.expira_respuesta_en && new Date(item.expira_respuesta_en) > now && !item.respondido_en);
+      if (valid.length) {
+        const patientIds = [...new Set(valid.map((item) => item.paciente_id))];
+        const patients = typeof patientModel.findAll === 'function' ? await patientModel.findAll({ where: { id: patientIds, estado: true }, attributes: ['id','nombres','apellidos'], transaction }) : [];
+        const names = new Map(patients.map((item) => [Number(item.id), `${item.nombres || ''} ${item.apellidos || ''}`.trim()]));
+        const options = valid.map((item) => ({ reminderId: item.id, appointmentId: item.cita_id, patientId: item.paciente_id, contactId: item.contacto_id || null, patientName: names.get(Number(item.paciente_id)) || 'Paciente', date: item.cita_fecha, time: String(item.cita_hora_inicio || '').slice(0, 5) }));
+        if (options.length === 1) {
+          const selected = options[0];
+          conversation = await model.create({ telefono: phone, paciente_id: selected.patientId, contacto_id: selected.contactId, paciente_contexto_id: selected.patientId, contexto_estado: 'SELECCIONADO', contexto_seleccionado_en: now, contexto_origen: 'RECORDATORIO_REFERENCIADO', tipo_contacto: CONTACT_TYPES.EXISTING, estado: CONVERSATION_STATUS.ACTIVE, paso_actual: CONVERSATION_STEPS.WAITING_REMINDER_RESPONSE, opcion_principal: null, contexto: { appointment_reminder: { reminder_id: selected.reminderId, appointment_id: selected.appointmentId } }, ...activity(now, timeout) }, { transaction });
+        } else {
+          conversation = await model.create({ telefono: phone, paciente_id: null, contacto_id: null, paciente_contexto_id: null, contexto_estado: 'SELECCION_REQUERIDA', contexto_seleccionado_en: null, contexto_origen: null, tipo_contacto: CONTACT_TYPES.EXISTING, estado: CONVERSATION_STATUS.ACTIVE, paso_actual: CONVERSATION_STEPS.WAITING_REMINDER_SELECTION, opcion_principal: null, contexto: { reminder_options: options, pending_reminder_response: input.message }, ...activity(now, timeout) }, { transaction });
+          return { responseText: reminderSelectionMessage(options), responseKind: 'REMINDER_SELECTION_REQUIRED', contactType: CONTACT_TYPES.EXISTING, conversationStep: conversation.paso_actual };
+        }
+      }
+    }
+
+    if (!conversation) {
       const identification = await identify(phone);
       if (![CONTACT_TYPES.EXISTING, CONTACT_TYPES.NEW].includes(identification.type)) {
         return { responseText: input.identificationResponse(identification), responseKind: 'CONTACT_IDENTIFICATION', contactType: identification.type };
       }
+      const options = safeSelectionOptions(identification.options || (identification.patient ? [{ patientId: identification.patient.id, displayName: identification.patient.displayName, firstName: identification.patient.firstName, source: identification.patient.source || 'PACIENTE', contactId: identification.patient.contactId }] : []));
+      const selected = options.length === 1 ? options[0] : null;
       conversation = await model.create({
         telefono: phone,
-        paciente_id: identification.patient?.id || null,
+        paciente_id: selected?.patientId || null,
+        contacto_id: selected?.contactId || identification.contactId || null,
+        paciente_contexto_id: selected?.patientId || null,
+        contexto_estado: selected ? 'SELECCIONADO' : options.length > 1 ? 'SELECCION_REQUERIDA' : 'SIN_SELECCION',
+        contexto_seleccionado_en: selected ? now : null,
+        contexto_origen: selected ? 'AUTO_UNICO' : null,
         tipo_contacto: identification.type,
         estado: CONVERSATION_STATUS.ACTIVE,
-        paso_actual: CONVERSATION_STEPS.WAITING_OPTION,
+        paso_actual: options.length > 1 ? CONVERSATION_STEPS.WAITING_PATIENT_SELECTION : CONVERSATION_STEPS.WAITING_OPTION,
         opcion_principal: null,
-        contexto: identification.type === CONTACT_TYPES.EXISTING && identification.patient?.id
-          ? { patient_reference: { id: identification.patient.id, first_name: sanitizeFirstName(identification.patient.firstName) } }
-          : {},
+        contexto: selected ? selectedContext(selected) : options.length > 1 ? { patient_options: options } : {},
         ...activity(now, timeout)
       }, { transaction });
       console.info('[WhatsApp] Conversación nueva creada');
-      return { responseText: buildMainMenu(identification.type, identification.patient?.firstName), responseKind: 'MAIN_MENU', contactType: identification.type, conversationStep: conversation.paso_actual };
+      return options.length > 1
+        ? { responseText: buildPatientSelectionMessage(options), responseKind: 'PATIENT_SELECTION_REQUIRED', contactType: identification.type, conversationStep: conversation.paso_actual }
+        : { responseText: buildMainMenu(identification.type, selected?.firstName), responseKind: 'MAIN_MENU', contactType: identification.type, conversationStep: conversation.paso_actual };
     }
 
     console.info('[WhatsApp] Conversación activa encontrada');
     const command = normalizeCommand(input.message);
     const greeting = normalizeGreeting(input.message);
+    if (input.replyToMessageId && typeof reminderModel.findOne === 'function') {
+      const referenced = await reminderModel.findOne({ where: { meta_message_id: input.replyToMessageId, telefono_normalizado: phone }, transaction, lock: transaction.LOCK?.UPDATE });
+      if (referenced && ['ACEPTADO','ENVIADO','ENTREGADO','LEIDO'].includes(referenced.estado) && referenced.expira_respuesta_en && new Date(referenced.expira_respuesta_en) > now) {
+        await conversation.update({ paciente_id: referenced.paciente_id, paciente_contexto_id: referenced.paciente_id, contacto_id: referenced.contacto_id || null, contexto_estado: 'SELECCIONADO', contexto_seleccionado_en: now, contexto_origen: 'RECORDATORIO_REFERENCIADO', paso_actual: CONVERSATION_STEPS.WAITING_REMINDER_RESPONSE, contexto: { appointment_reminder: { reminder_id: referenced.id, appointment_id: referenced.cita_id, replied_to_message_id: input.replyToMessageId } }, ...activity(now, timeout) }, { transaction });
+        const result = await processReminderResponse({ conversation, message: input.message, reminderModel, appointmentModel, transaction, activity: activity(now, timeout), now });
+        return { ...result, contactType: conversation.tipo_contacto };
+      }
+    }
+    if (!reminderSteps.has(conversation.paso_actual) && conversation.paso_actual !== CONVERSATION_STEPS.WAITING_REMINDER_SELECTION && reminderReplyLike(input.message) && typeof reminderModel.findAll === 'function') {
+      const pending = (await reminderModel.findAll({ where: { telefono_normalizado: phone, estado: ['ACEPTADO','ENVIADO','ENTREGADO','LEIDO'] }, transaction, lock: transaction.LOCK?.UPDATE })).filter((item) => item.expira_respuesta_en && new Date(item.expira_respuesta_en) > now && !item.respondido_en);
+      if (pending.length) {
+        const patientIds = [...new Set(pending.map((item) => item.paciente_id))];
+        const patients = typeof patientModel.findAll === 'function' ? await patientModel.findAll({ where: { id: patientIds, estado: true }, attributes: ['id','nombres','apellidos'], transaction }) : [];
+        const names = new Map(patients.map((item) => [Number(item.id), `${item.nombres || ''} ${item.apellidos || ''}`.trim()]));
+        const options = pending.map((item) => ({ reminderId: item.id, appointmentId: item.cita_id, patientId: item.paciente_id, contactId: item.contacto_id || null, patientName: names.get(Number(item.paciente_id)) || 'Paciente', date: item.cita_fecha, time: String(item.cita_hora_inicio || '').slice(0, 5) }));
+        if (options.length > 1) {
+          await conversation.update({ paciente_id: null, paciente_contexto_id: null, contacto_id: null, contexto_estado: 'SELECCION_REQUERIDA', contexto_seleccionado_en: null, contexto_origen: null, paso_actual: CONVERSATION_STEPS.WAITING_REMINDER_SELECTION, contexto: { reminder_options: options, pending_reminder_response: input.message }, ...activity(now, timeout) }, { transaction });
+          return { responseText: reminderSelectionMessage(options), responseKind: 'REMINDER_SELECTION_REQUIRED', contactType: conversation.tipo_contacto, conversationStep: conversation.paso_actual };
+        }
+        const selected = options[0];
+        await conversation.update({ paciente_id: selected.patientId, paciente_contexto_id: selected.patientId, contacto_id: selected.contactId, contexto_estado: 'SELECCIONADO', contexto_seleccionado_en: now, contexto_origen: 'RECORDATORIO_REFERENCIADO', paso_actual: CONVERSATION_STEPS.WAITING_REMINDER_RESPONSE, contexto: { appointment_reminder: { reminder_id: selected.reminderId, appointment_id: selected.appointmentId } }, ...activity(now, timeout) }, { transaction });
+      }
+    }
+    if (conversation.paso_actual === CONVERSATION_STEPS.WAITING_REMINDER_SELECTION) {
+      if (['CANCELAR','SALIR'].includes(command)) { await conversation.update({ estado: CONVERSATION_STATUS.CANCELLED, contexto: {}, ...activity(now, timeout) }, { transaction }); return { responseText: 'Aclaración cancelada. No se modificó ninguna cita.', responseKind: 'REMINDER_SELECTION_CANCELLED', contactType: conversation.tipo_contacto, conversationStep: conversation.paso_actual }; }
+      const options = Array.isArray(conversation.contexto?.reminder_options) ? conversation.contexto.reminder_options : [];
+      const selected = options[Number(String(input.message).trim()) - 1];
+      if (!selected) return { responseText: `Esa opción no es válida. Responda con ${options.map((_, index) => index + 1).join(' o ')}.`, responseKind: 'INVALID_REMINDER_SELECTION', contactType: conversation.tipo_contacto, conversationStep: conversation.paso_actual };
+      const originalResponse = conversation.contexto.pending_reminder_response;
+      await conversation.update({ paciente_id: selected.patientId, paciente_contexto_id: selected.patientId, contacto_id: selected.contactId, contexto_estado: 'SELECCIONADO', contexto_seleccionado_en: now, contexto_origen: 'SELECCION_USUARIO', paso_actual: CONVERSATION_STEPS.WAITING_REMINDER_RESPONSE, contexto: { appointment_reminder: { reminder_id: selected.reminderId, appointment_id: selected.appointmentId } }, ...activity(now, timeout) }, { transaction });
+      const result = await processReminderResponse({ conversation, message: originalResponse, reminderModel, appointmentModel, transaction, activity: activity(now, timeout), now });
+      return { ...result, contactType: conversation.tipo_contacto };
+    }
+    if (command === 'CAMBIAR_PACIENTE') {
+      const identification = await identify(phone); const options = safeSelectionOptions(identification.options || []);
+      if (!options.length) return { responseText: 'No encontramos pacientes autorizados para este número.', responseKind: 'NO_AUTHORIZED_PATIENTS', contactType: conversation.tipo_contacto };
+      if (options.length === 1) {
+        const selected = options[0]; await conversation.update({ paciente_id: selected.patientId, paciente_contexto_id: selected.patientId, contacto_id: selected.contactId || identification.contactId || null, contexto_estado: 'SELECCIONADO', contexto_seleccionado_en: now, contexto_origen: 'AUTO_UNICO', paso_actual: CONVERSATION_STEPS.WAITING_OPTION, opcion_principal: null, contexto: selectedContext(selected), ...activity(now, timeout) }, { transaction });
+        return { responseText: buildExistingMenu(selected.firstName), responseKind: 'PATIENT_AUTO_SELECTED', contactType: conversation.tipo_contacto, conversationStep: CONVERSATION_STEPS.WAITING_OPTION };
+      }
+      await conversation.update({ paciente_id: null, paciente_contexto_id: null, contacto_id: identification.contactId || null, contexto_estado: 'SELECCION_REQUERIDA', contexto_seleccionado_en: null, contexto_origen: null, paso_actual: CONVERSATION_STEPS.WAITING_PATIENT_SELECTION, opcion_principal: null, contexto: { patient_options: options }, ...activity(now, timeout) }, { transaction });
+      return { responseText: buildPatientSelectionMessage(options), responseKind: 'PATIENT_SELECTION_REQUIRED', contactType: conversation.tipo_contacto, conversationStep: CONVERSATION_STEPS.WAITING_PATIENT_SELECTION };
+    }
+    if (conversation.paso_actual === CONVERSATION_STEPS.WAITING_PATIENT_SELECTION) {
+      if (['CANCELAR','SALIR'].includes(command)) {
+        await conversation.update({ paciente_id: null, paciente_contexto_id: null, contacto_id: null, contexto_estado: 'SIN_SELECCION', contexto_seleccionado_en: null, contexto_origen: null, paso_actual: CONVERSATION_STEPS.WAITING_OPTION, contexto: {}, ...activity(now, timeout) }, { transaction });
+        return { responseText: 'Selección cancelada. Escribe MENÚ para comenzar nuevamente.', responseKind: 'PATIENT_SELECTION_CANCELLED', contactType: conversation.tipo_contacto, conversationStep: CONVERSATION_STEPS.WAITING_OPTION };
+      }
+      const options = Array.isArray(conversation.contexto?.patient_options) ? conversation.contexto.patient_options : [];
+      const index = /^\d+$/.test(String(input.message || '').trim()) ? Number(String(input.message).trim()) - 1 : -1;
+      if (!options[index]) return { responseText: `Esa opción no es válida. Responda con ${options.map((_, i) => i + 1).join(', ')}.`, responseKind: 'INVALID_PATIENT_SELECTION', contactType: conversation.tipo_contacto, conversationStep: conversation.paso_actual };
+      const selected = options[index];
+      await conversation.update({ paciente_id: selected.patientId, paciente_contexto_id: selected.patientId, contacto_id: selected.contactId || conversation.contacto_id || null, contexto_estado: 'SELECCIONADO', contexto_seleccionado_en: now, contexto_origen: 'SELECCION_USUARIO', paso_actual: CONVERSATION_STEPS.WAITING_OPTION, opcion_principal: null, contexto: selectedContext(selected), ...activity(now, timeout) }, { transaction });
+      return { responseText: buildExistingMenu(selected.firstName), responseKind: 'PATIENT_SELECTED', contactType: conversation.tipo_contacto, conversationStep: CONVERSATION_STEPS.WAITING_OPTION };
+    }
+    if (conversation.paciente_contexto_id != null) {
+      const currentIdentity = await identify(phone);
+      const authorized = (currentIdentity.options || []).some((option) => Number(option.patientId) === Number(conversation.paciente_contexto_id));
+      if (!authorized) {
+        await conversation.update({ paciente_id: null, paciente_contexto_id: null, contacto_id: null, contexto_estado: 'SIN_SELECCION', contexto_seleccionado_en: null, contexto_origen: null, paso_actual: CONVERSATION_STEPS.WAITING_OPTION, opcion_principal: null, contexto: {}, ...activity(now, timeout) }, { transaction });
+        return { responseText: 'La autorización para gestionar este paciente ya no está vigente.', responseKind: 'PATIENT_CONTEXT_UNAUTHORIZED', contactType: conversation.tipo_contacto, conversationStep: CONVERSATION_STEPS.WAITING_OPTION };
+      }
+    }
     if (['MENU', 'INICIO', 'REINICIAR'].includes(command)) {
       if (conversation.contexto?.request_id && ![CONVERSATION_STEPS.APPOINTMENT_CREATED, CONVERSATION_STEPS.REFERRED_RECEPTION].includes(conversation.paso_actual)) {
         await cancelAvailabilityRequest({ conversation, requestModel, transaction, activity: activity(now, timeout), reason: 'Flujo abandonado desde el menú' });
@@ -303,6 +408,12 @@ const processConversationMessage = async (input, dependencies = {}) => {
 
     if (reminderSteps.has(conversation.paso_actual)) {
       const result = await processReminderResponse({ conversation, message: input.message, reminderModel, appointmentModel, transaction, activity: activity(now, timeout), now });
+      if (result) return { ...result, contactType: conversation.tipo_contacto };
+    }
+
+    if (newPatientSteps.has(conversation.paso_actual)) {
+      const result = await processNewPatientStep({ conversation, message: input.message, transaction, activity: activity(now, timeout), now, models: { patientModel, contactModel, relationModel } });
+      if (['OTHER_ADULT_REFERRED','POSSIBLE_PATIENT_DUPLICATE','AMBIGUOUS_GUARDIAN'].includes(result?.responseKind)) await createOrReuseReceptionReferral({ conversation, type: 'REGISTRO_PACIENTE', transaction, referralModel, now, db });
       if (result) return { ...result, contactType: conversation.tipo_contacto };
     }
 

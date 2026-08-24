@@ -2,11 +2,44 @@ const { Op } = require('sequelize');
 const { HistoriaClinica, Paciente, RegistroSemanal, Sesion, Usuario, sequelize } = require('../models');
 const { ensureRegistroSemanalSchema } = require('../services/registroSemanalSchema.service');
 const { construirResumen, sincronizarSemana } = require('../services/sesionSemanalSync.service');
+const { enrichRecordsWithAdministrativePhone } = require('../services/patientAdministrativeContact.service');
 
 const includeRegistroSemanal = [
   { model: Paciente, as: 'paciente' },
   { model: HistoriaClinica, as: 'historia_clinica' }
 ];
+
+const pagoHistoriaKey = (pacienteId, historiaClinicaId) => `${pacienteId}:${historiaClinicaId}`;
+
+const agregarPagosSemana = (registros, pagos = []) => {
+  const pagosPorHistoria = new Map(pagos.map((pago) => [
+    pagoHistoriaKey(pago.paciente_id, pago.historia_clinica_id),
+    Number(pago.pagado_en_semana || 0)
+  ]));
+  return registros.map((registro) => {
+    const data = typeof registro?.toJSON === 'function' ? registro.toJSON() : registro;
+    return {
+      ...data,
+      pagado_en_semana: pagosPorHistoria.get(pagoHistoriaKey(data.paciente_id, data.historia_clinica_id)) || 0
+    };
+  });
+};
+
+const obtenerPagosSemana = async (fechaInicio, fechaFin, transaction = null) => {
+  if (!fechaInicio || !fechaFin) return [];
+  const [pagos] = await sequelize.query(`
+    SELECT c.paciente_id, c.historia_clinica_id,
+      COALESCE(SUM(m.monto), 0)::numeric AS pagado_en_semana
+    FROM movimientos_pago m
+    INNER JOIN conceptos_cobro c ON c.id = m.concepto_cobro_id
+    WHERE m.estado = 'Activo'
+      AND m.fecha BETWEEN :fechaInicio AND :fechaFin
+      AND c.activo = TRUE
+      AND c.historia_clinica_id IS NOT NULL
+    GROUP BY c.paciente_id, c.historia_clinica_id
+  `, { replacements: { fechaInicio, fechaFin }, transaction });
+  return pagos;
+};
 
 const validar = (body) => {
   if (!body.paciente_id) return 'paciente_id es requerido';
@@ -99,7 +132,10 @@ const listarRegistros = async (req, res, next) => {
         ? { ...data, sesiones_resumen: construirResumen(sesionesConEvolutivo), total_sesiones: sesionesConEvolutivo.length }
         : data;
     });
-    return res.json(respuesta);
+    const respuestaFinanciera = req.usuario.rol === 'admin' && req.query.fecha_inicio && req.query.fecha_fin
+      ? agregarPagosSemana(respuesta, await obtenerPagosSemana(req.query.fecha_inicio, req.query.fecha_fin))
+      : respuesta;
+    return res.json(await enrichRecordsWithAdministrativePhone(respuestaFinanciera));
   } catch (error) {
     return next(error);
   }
@@ -110,7 +146,7 @@ const obtenerRegistro = async (req, res, next) => {
     await ensureRegistroSemanalSchema();
     const registro = await RegistroSemanal.findByPk(req.params.id, { include: includeRegistroSemanal });
     if (!registro) return res.status(404).json({ message: 'Registro semanal no encontrado' });
-    return res.json(registro);
+    return res.json(await enrichRecordsWithAdministrativePhone(registro));
   } catch (error) {
     return next(error);
   }
@@ -141,7 +177,7 @@ const crearRegistro = async (req, res, next) => {
         generado_automaticamente: false
       });
       const completoExistente = await RegistroSemanal.findByPk(existente.id, { include: includeRegistroSemanal });
-      return res.json(completoExistente);
+      return res.json(await enrichRecordsWithAdministrativePhone(completoExistente));
     }
 
     const registro = await RegistroSemanal.create({
@@ -150,7 +186,7 @@ const crearRegistro = async (req, res, next) => {
       generado_automaticamente: false
     });
     const completo = await RegistroSemanal.findByPk(registro.id, { include: includeRegistroSemanal });
-    return res.status(201).json(completo);
+    return res.status(201).json(await enrichRecordsWithAdministrativePhone(completo));
   } catch (error) {
     return next(error);
   }
@@ -172,7 +208,7 @@ const actualizarRegistro = async (req, res, next) => {
       generado_automaticamente: false
     });
     const completo = await RegistroSemanal.findByPk(registro.id, { include: includeRegistroSemanal });
-    return res.json(completo);
+    return res.json(await enrichRecordsWithAdministrativePhone(completo));
   } catch (error) {
     return next(error);
   }
@@ -232,10 +268,13 @@ const recalcularSemana = async (req, res, next) => {
       order: [['id', 'DESC']]
     });
 
+    const respuestaFinanciera = req.usuario.rol === 'admin'
+      ? agregarPagosSemana(registros, await obtenerPagosSemana(semanaInicio, semanaFin))
+      : registros;
     return res.json({
       message: 'Resumen actualizado desde sesiones diarias',
       total: registros.length,
-      registros
+      registros: await enrichRecordsWithAdministrativePhone(respuestaFinanciera)
     });
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
@@ -249,5 +288,7 @@ module.exports = {
   crearRegistro,
   actualizarRegistro,
   eliminarRegistro,
-  recalcularSemana
+  recalcularSemana,
+  agregarPagosSemana,
+  obtenerPagosSemana
 };

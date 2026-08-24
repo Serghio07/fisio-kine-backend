@@ -4,6 +4,7 @@ const {
   InformeMedico, PlanillaAtencion, ActividadSistema
 } = require('../models');
 const { boliviaDateTime } = require('../utils/boliviaDateTime');
+const { patientDtoWithAdministrativePhone } = require('../services/patientAdministrativeContact.service');
 
 const registrarAuditoria = (req, pacienteId, accion, detalle) => {
   if (!req.usuario?.id) return Promise.resolve();
@@ -99,6 +100,7 @@ const resumenPaciente = async (req, res, next) => {
     ]);
 
     const sesionesReales = consolidarSesionesReales(sesiones, conceptos);
+    const pacienteDto = await patientDtoWithAdministrativePhone(paciente);
     await registrarAuditoria(
       req,
       pacienteId,
@@ -111,9 +113,11 @@ const resumenPaciente = async (req, res, next) => {
     );
     if (req.query.scope === 'clinical') {
       return res.json({
-        paciente,
+        paciente: pacienteDto,
         historias: historias.map((model) => {
           const item = model.toJSON();
+          const realizadas = sesionesReales.filter((sesion) => Number(sesion.historia_clinica_id) === Number(item.id) && sesion.asistencia === 'asistio').length;
+          const totalPlanificado = Number(item.evaluacion_final?.sesiones_contratadas || 0);
           return {
             id: item.id,
             fecha_evaluacion: item.fecha_evaluacion,
@@ -122,6 +126,12 @@ const resumenPaciente = async (req, res, next) => {
             profesional_cargo: item.profesional_cargo,
             estado: item.estado,
             anulada: item.anulada,
+            evaluacion_final: item.evaluacion_final,
+            resumen_sesiones: {
+              total_planificado: totalPlanificado,
+              sesiones_realizadas: realizadas,
+              sesiones_restantes: Math.max(totalPlanificado - realizadas, 0)
+            },
             usuario: item.usuario
               ? { id: item.usuario.id, nombre: item.usuario.nombre }
               : null
@@ -153,7 +163,7 @@ const resumenPaciente = async (req, res, next) => {
       });
     }
     return res.json({
-      paciente,
+      paciente: pacienteDto,
       historias,
       sesiones: sesionesReales,
       citas,

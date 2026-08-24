@@ -1,4 +1,4 @@
-const { HistoriaClinica, InformeMedico, Paciente } = require('../models');
+const { HistoriaClinica, InformeMedico, Paciente, Sesion } = require('../models');
 
 const includePaciente = [
   { model: Paciente, as: 'paciente' },
@@ -43,6 +43,10 @@ const validarHistoriaActiva = async (pacienteId, historiaClinicaId) => {
   return null;
 };
 
+const contarSesionesRealizadas = (historiaClinicaId) => Sesion.count({
+  where: { historia_clinica_id: historiaClinicaId, asistencia: 'asistio', anulada: false }
+});
+
 const listarInformes = async (req, res, next) => {
   try {
     const informes = await InformeMedico.findAll({
@@ -77,7 +81,8 @@ const crearInforme = async (req, res, next) => {
     const errorHistoria = await validarHistoriaActiva(req.body.paciente_id, req.body.historia_clinica_id);
     if (errorHistoria) return res.status(400).json({ message: errorHistoria });
 
-    const informe = await InformeMedico.create(normalizarInforme(req.body, nombreUsuarioAutenticado(req)));
+    const cantidadSesiones = await contarSesionesRealizadas(req.body.historia_clinica_id);
+    const informe = await InformeMedico.create(normalizarInforme({ ...req.body, cantidad_sesiones: cantidadSesiones }, nombreUsuarioAutenticado(req)));
     const informeCompleto = await InformeMedico.findByPk(informe.id, { include: includePaciente });
     return res.status(201).json(informeCompleto);
   } catch (error) {
@@ -90,10 +95,12 @@ const actualizarInforme = async (req, res, next) => {
     const informe = await InformeMedico.findByPk(req.params.id);
     if (!informe) return res.status(404).json({ message: 'Informe medico no encontrado' });
 
+    const cantidadSesiones = await contarSesionesRealizadas(req.body.historia_clinica_id || informe.historia_clinica_id);
     const payload = normalizarInforme(
       { ...informe.toJSON(), ...req.body },
       nombreUsuarioAutenticado(req)
     );
+    payload.cantidad_sesiones = cantidadSesiones;
     const errorValidacion = validarInforme(payload);
     if (errorValidacion) return res.status(400).json({ message: errorValidacion });
 

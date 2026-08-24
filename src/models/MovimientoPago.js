@@ -4,6 +4,7 @@ const sequelize = require('../config/database');
 const MovimientoPago = sequelize.define('MovimientoPago', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   concepto_cobro_id: { type: DataTypes.INTEGER, allowNull: false },
+  operacion_pago_id: DataTypes.INTEGER,
   usuario_receptor_id: { type: DataTypes.INTEGER, allowNull: false },
   arqueo_id: DataTypes.INTEGER,
   fecha: { type: DataTypes.DATEONLY, allowNull: false },

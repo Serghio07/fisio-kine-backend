@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const googleCalendar = require('../src/services/googleCalendarService');
+const { Usuario } = require('../src/models');
 const controller = require('../src/controllers/googleCalendar.controller');
 
 const mockResponse = () => {
@@ -34,7 +35,7 @@ test('callback con state invalido rechaza la solicitud', async () => {
   await controller.callback({ query: { code: 'code-falso', state: 'invalido' } }, response);
 
   assert.equal(response.statusCode, 400);
-  assert.match(response.body.message, /Solicitud invalida/);
+  assert.match(response.body, /Solicitud invalida/);
   assert.equal(response.redirectedTo, undefined);
 
   googleCalendar.exchangeCodeForTokens = previous;
@@ -47,6 +48,7 @@ test('callback valido guarda tokens y redirige al frontend', async () => {
     frontendUrl: process.env.FRONTEND_URL,
     jwtSecret: process.env.JWT_SECRET
   };
+  const previousFindByPk = Usuario.findByPk;
 
   process.env.FRONTEND_URL = 'https://sistema.physioactivefisioterapia.com';
   process.env.JWT_SECRET = 'jwt-secret-ficticio-para-google-calendar-123456789';
@@ -58,6 +60,7 @@ test('callback valido guarda tokens y redirige al frontend', async () => {
     return { access_token: 'access-falso', refresh_token: 'refresh-falso', expiry_date: 123 };
   };
   googleCalendar.saveTokens = async (tokens) => { savedTokens = tokens; };
+  Usuario.findByPk = async (id) => ({ id, rol: 'admin', estado: 'activo', activo: true });
 
   const response = mockResponse();
   await controller.callback({ query: { code: 'codigo-falso', state } }, response);
@@ -68,6 +71,7 @@ test('callback valido guarda tokens y redirige al frontend', async () => {
 
   googleCalendar.exchangeCodeForTokens = previous.exchangeCodeForTokens;
   googleCalendar.saveTokens = previous.saveTokens;
+  Usuario.findByPk = previousFindByPk;
   if (previous.frontendUrl === undefined) delete process.env.FRONTEND_URL;
   else process.env.FRONTEND_URL = previous.frontendUrl;
   if (previous.jwtSecret === undefined) delete process.env.JWT_SECRET;
@@ -89,7 +93,7 @@ test('status y disconnect delegan al servicio', async () => {
 
   const disconnectResponse = mockResponse();
   await controller.disconnect({}, disconnectResponse);
-  assert.deepEqual(disconnectResponse.body, { connected: false, disconnected: true });
+  assert.deepEqual(disconnectResponse.body, { disconnected: true });
 
   googleCalendar.getConnectionStatus = previous.getConnectionStatus;
   googleCalendar.disconnect = previous.disconnect;

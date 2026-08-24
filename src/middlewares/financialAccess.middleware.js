@@ -33,6 +33,7 @@ const FINANCIAL_KEYS = new Set([
   'monto_esperado',
   'monto_total',
   'total_pagado',
+  'pagado_en_semana',
   'total_cobrado',
   'total_facturado',
   'total_esperado',

@@ -1,14 +1,14 @@
 const { ConceptoCobro, HistoriaClinica, MovimientoPago, MovimientoPagoAuditoria } = require('../models');
+const { calculatePaymentState } = require('./paymentFinancialState.service');
 
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
 const syncPaymentState = async (concepto, session, transaction) => {
   const movements = await MovimientoPago.findAll({ where: { concepto_cobro_id: concepto.id, estado: 'Activo' }, transaction });
   const total = money(movements.reduce((sum, item) => sum + Number(item.monto || 0), 0));
-  const expected = money(concepto.monto_esperado);
-  const estado = !concepto.activo ? 'Anulado' : concepto.exonerado ? 'Exonerado' : total <= 0 ? 'Pendiente' : total < expected ? 'Parcial' : total > expected ? 'Saldo a favor' : 'Pagado';
-  await concepto.update({ estado }, { transaction });
-  return { total, saldo: money(Math.max(expected - total, 0)), estado };
+  const financial = calculatePaymentState(concepto, total);
+  await concepto.update({ estado: financial.estado }, { transaction });
+  return { total, saldo: financial.saldo, estado: financial.estado };
 };
 
 const sincronizarConceptoSesion = async (session, transaction, { importarPago = false } = {}) => {
@@ -29,6 +29,9 @@ const sincronizarConceptoSesion = async (session, transaction, { importarPago = 
     },
     transaction
   });
+  const wantsExemption = session.estado_pago === 'Sin costo';
+  const activePayments = created ? 0 : await MovimientoPago.count({ where: { concepto_cobro_id: concept.id, estado: 'Activo' }, transaction });
+  if (wantsExemption && (activePayments > 0 || money(session.monto_pagado) > 0)) throw Object.assign(new Error('No se puede exonerar un concepto con pagos activos. Anule primero la operación o el pago correspondiente.'), { status: 409 });
   if (!created) await concept.update({
     paciente_id: session.paciente_id,
     historia_clinica_id: session.historia_clinica_id,
@@ -36,7 +39,7 @@ const sincronizarConceptoSesion = async (session, transaction, { importarPago = 
     detalle: `Sesión ${session.numero_sesion}${history?.diagnostico_medico ? ` — ${history.diagnostico_medico}` : ''}`,
     monto_esperado: money(session.monto_sesion),
     profesional_responsable: session.profesional_responsable,
-    exonerado: session.estado_pago === 'Sin costo',
+    exonerado: wantsExemption,
     activo: !session.anulada
   }, { transaction });
 

@@ -14,6 +14,10 @@ const {
 const { randomUUID } = require('crypto');
 const { Op } = require('sequelize');
 const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
+const { enrichRecordsWithAdministrativePhone } = require('../services/patientAdministrativeContact.service');
+const { synchronizeTreatmentTotal } = require('../services/treatmentPlan.service');
+const { syncAppointmentById } = require('../services/googleCalendarSync.service');
+const { expandTreatmentPlan, listTreatmentPlanExpansions } = require('../services/treatmentPlanExpansion.service');
 
 const includeCompleto = [
   { model: Paciente, as: 'paciente' },
@@ -181,7 +185,7 @@ const listarHistorias = async (req, res, next) => {
       order: [['id', 'DESC']],
       limit: 500
     });
-    return res.json(historias);
+    return res.json(await enrichRecordsWithAdministrativePhone(historias));
   } catch (error) {
     return next(error);
   }
@@ -193,7 +197,7 @@ const obtenerHistoria = async (req, res, next) => {
     if (!historia || (req.usuario.rol !== 'admin' && (historia.anulada || historia.estado === 'anulada'))) {
       return res.status(404).json({ message: 'Historia clinica no encontrada' });
     }
-    return res.json(historia);
+    return res.json(await enrichRecordsWithAdministrativePhone(historia));
   } catch (error) {
     return next(error);
   }
@@ -209,7 +213,7 @@ const listarHistoriasPorPaciente = async (req, res, next) => {
       include: includeCompleto,
       order: [['id', 'DESC']]
     });
-    return res.json(historias);
+    return res.json(await enrichRecordsWithAdministrativePhone(historias));
   } catch (error) {
     return next(error);
   }
@@ -256,6 +260,9 @@ const crearHistoria = async (req, res, next) => {
     await crearOActualizarRelacion(CondicionActual, historia.id, body.condicion_actual, transaction);
     await crearOActualizarRelacion(IntervencionClinica, historia.id, body.intervencion_clinica, transaction);
     await crearOActualizarRelacion(EvaluacionFinal, historia.id, body.evaluacion_final, transaction);
+    if (body.evaluacion_final?.sesiones_contratadas !== undefined) {
+      await synchronizeTreatmentTotal({ historyId: historia.id, total: body.evaluacion_final.sesiones_contratadas, transaction, changedBy: nombreProfesional(profesional) });
+    }
 
     await transaction.commit();
 
@@ -269,6 +276,7 @@ const crearHistoria = async (req, res, next) => {
 
 const actualizarHistoria = async (req, res, next) => {
   const transaction = await sequelize.transaction();
+  let treatmentSync = null;
 
   try {
     const historia = await HistoriaClinica.findByPk(req.params.id, { transaction });
@@ -296,6 +304,19 @@ const actualizarHistoria = async (req, res, next) => {
       return res.status(400).json({ message: errorValidacion });
     }
 
+    if (body.evaluacion_final?.sesiones_contratadas !== undefined) {
+      const evaluacionActual = await EvaluacionFinal.findOne({
+        where: { historia_clinica_id: historia.id },
+        attributes: ['sesiones_contratadas'],
+        transaction,
+        lock: transaction.LOCK.UPDATE
+      });
+      if (evaluacionActual && Number(body.evaluacion_final.sesiones_contratadas) > Number(evaluacionActual.sesiones_contratadas)) {
+        await transaction.rollback();
+        return res.status(409).json({ message: 'Para aumentar las sesiones utiliza la opcion Ampliar sesiones e indica el motivo.' });
+      }
+    }
+
     if (Array.isArray(body.evolutivo)) {
       body.evolutivo = prepararEvolutivo(body.evolutivo, historia, historia.evolutivo || []);
     }
@@ -306,13 +327,45 @@ const actualizarHistoria = async (req, res, next) => {
     await crearOActualizarRelacion(CondicionActual, historia.id, body.condicion_actual, transaction);
     await crearOActualizarRelacion(IntervencionClinica, historia.id, body.intervencion_clinica, transaction);
     await crearOActualizarRelacion(EvaluacionFinal, historia.id, body.evaluacion_final, transaction);
+    if (body.evaluacion_final?.sesiones_contratadas !== undefined) {
+      treatmentSync = await synchronizeTreatmentTotal({ historyId: historia.id, total: body.evaluacion_final.sesiones_contratadas, transaction, changedBy: nombreProfesional(profesional) });
+    }
 
     await transaction.commit();
 
+    for (const appointmentId of treatmentSync?.canceledAppointmentIds || []) await syncAppointmentById(appointmentId);
+
     const historiaCompleta = await HistoriaClinica.findByPk(historia.id, { include: includeCompleto });
-    return res.json(historiaCompleta);
+    return res.json(await enrichRecordsWithAdministrativePhone(historiaCompleta));
   } catch (error) {
     await transaction.rollback();
+    return next(error);
+  }
+};
+
+const ampliarSesiones = async (req, res, next) => {
+  try {
+    const resultado = await expandTreatmentPlan({
+      historyId: req.params.id,
+      increment: req.body?.incremento,
+      reason: req.body?.motivo,
+      userId: req.usuario.id,
+      requestId: req.get('Idempotency-Key')
+    });
+    return res.status(resultado.idempotente ? 200 : 201).json(resultado);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const listarAmpliaciones = async (req, res, next) => {
+  try {
+    const historia = await HistoriaClinica.findByPk(req.params.id, { attributes: ['id', 'estado', 'anulada'] });
+    if (!historia || (req.usuario.rol !== 'admin' && (historia.anulada || historia.estado === 'anulada'))) {
+      return res.status(404).json({ message: 'Historia clinica no encontrada' });
+    }
+    return res.json(await listTreatmentPlanExpansions(historia.id));
+  } catch (error) {
     return next(error);
   }
 };
@@ -378,6 +431,8 @@ module.exports = {
   listarHistoriasPorPaciente,
   crearHistoria,
   actualizarHistoria,
+  ampliarSesiones,
+  listarAmpliaciones,
   eliminarHistoria,
   restaurarHistoria
 };

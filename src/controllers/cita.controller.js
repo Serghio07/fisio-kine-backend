@@ -14,6 +14,8 @@ const { ensureNoShowSession, reconcileAttendedAppointments } = require('../servi
 const { cleanupTemporaryWhatsappNoShow } = require('../services/temporaryWhatsappPatientCleanup.service');
 const { clinicalPatientEligibilityError } = require('../services/clinicalPatientEligibility.service');
 const { deleteAppointmentEvent, syncAppointment } = require('../services/googleCalendarSync.service');
+const { enrichRecordsWithAdministrativePhone } = require('../services/patientAdministrativeContact.service');
+const { synchronizeTreatmentTotal } = require('../services/treatmentPlan.service');
 
 const includeCita = [
   { model: Paciente, as: 'paciente' },
@@ -108,6 +110,26 @@ const validarSolapamiento = async (payload, citaId = null, dependencies = {}) =>
   return simultaneous >= capacity ? 'Se alcanzó la capacidad máxima de atención en ese rango de horario' : null;
 };
 
+const validarSolapamientoProgramaciones = (items = []) => {
+  const normalized = items.map((item) => ({
+    ...item,
+    hora_inicio: normalizarHora(item.hora_inicio),
+    hora_fin: normalizarHora(item.hora_fin)
+  }));
+  for (let left = 0; left < normalized.length; left += 1) {
+    for (let right = left + 1; right < normalized.length; right += 1) {
+      const first = normalized[left];
+      const second = normalized[right];
+      if (first.fecha !== second.fecha) continue;
+      const firstEnd = first.hora_fin || toTime(toMinutes(first.hora_inicio) + 1);
+      if (isSlotOverlapping({ start: first.hora_inicio, end: firstEnd }, second)) {
+        return `Las sesiones ${first.numero_sesion} y ${second.numero_sesion} tienen horarios superpuestos`;
+      }
+    }
+  }
+  return null;
+};
+
 const resumenProgramacion = async (historiaId, transaction) => {
   await actualizarCitasNoAsistidas(transaction);
   const historia = await HistoriaClinica.findByPk(historiaId, {
@@ -115,9 +137,11 @@ const resumenProgramacion = async (historiaId, transaction) => {
     transaction
   });
   if (!historia) return null;
-  const indicadas = Number(historia.evaluacion_final?.sesiones_contratadas || 0);
-  const realizadas = await Sesion.count({
+  const configuradas = Number(historia.evaluacion_final?.sesiones_contratadas || 0);
+  const sesionesRealizadas = await Sesion.findAll({
     where: { historia_clinica_id: historia.id, asistencia: 'asistio', anulada: false },
+    attributes: ['id', 'fecha', 'numero_sesion', 'sesiones_debe', 'profesional_responsable'],
+    order: [['numero_sesion', 'ASC'], ['fecha', 'ASC']],
     transaction
   });
   const programaciones = await Cita.findAll({
@@ -127,16 +151,20 @@ const resumenProgramacion = async (historiaId, transaction) => {
     transaction
   });
   const activas = programaciones.filter((c) => !['Cancelada', 'Reprogramada'].includes(c.estado));
-  const numerosActivos = new Set(activas.map((c) => c.numero_sesion));
+  const numerosActivos = new Set(activas.map((c) => c.numero_sesion).filter(Boolean));
+  const indicadas = configuradas;
+  const numerosCubiertos = new Set([...numerosActivos, ...sesionesRealizadas.map((s) => s.numero_sesion).filter(Boolean)]);
+  const realizadas = sesionesRealizadas.length;
   return {
     historia,
     indicadas,
     realizadas,
-    programadas: activas.filter((c) => ['Programada', 'Confirmada'].includes(c.estado)).length,
-    pendientes_programar: Math.max(indicadas - realizadas - numerosActivos.size, 0),
+    programadas: numerosActivos.size,
+    pendientes_programar: Math.max(indicadas - numerosCubiertos.size, 0),
     restantes: Math.max(indicadas - realizadas, 0),
     canceladas: programaciones.filter((c) => c.estado === 'Cancelada').length,
     faltas: programaciones.filter((c) => ['Falto', 'No asistio'].includes(c.estado)).length,
+    sesiones_realizadas: sesionesRealizadas,
     porcentaje: indicadas ? Math.round(realizadas * 100 / indicadas) : 0,
     programaciones
   };
@@ -179,6 +207,8 @@ const crearProgramacion = async (req, res, next) => {
     }
     const items = Array.isArray(req.body.programaciones) ? req.body.programaciones : [];
     if (!items.length) { await transaction.rollback(); return res.status(400).json({ message: 'Debe incluir al menos una fecha' }); }
+    const batchOverlap = validarSolapamientoProgramaciones(items);
+    if (batchOverlap) throw Object.assign(new Error(batchOverlap), { status: 409 });
     const numeros = new Set();
     for (const item of items) {
       const numero = Number(item.numero_sesion);
@@ -242,7 +272,7 @@ const listarCitas = async (req, res, next) => {
       include: includeCitaAgenda,
       order: [['fecha', 'DESC'], ['hora_inicio', 'ASC']]
     });
-    return res.json(citas);
+    return res.json(await enrichRecordsWithAdministrativePhone(citas));
   } catch (error) {
     return next(error);
   }
@@ -253,7 +283,7 @@ const obtenerCita = async (req, res, next) => {
     await actualizarCitasNoAsistidas();
     const cita = await Cita.findByPk(req.params.id, { include: includeCita });
     if (!cita) return res.status(404).json({ message: 'Cita no encontrada' });
-    return res.json(cita);
+    return res.json(await enrichRecordsWithAdministrativePhone(cita));
   } catch (error) {
     return next(error);
   }
@@ -281,7 +311,7 @@ const crearCita = async (req, res, next) => {
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     // La sincronizacion externa no debe retrasar la confirmacion del guardado local.
     void syncAppointment(citaCompleta);
-    return res.status(201).json(citaCompleta);
+    return res.status(201).json(await enrichRecordsWithAdministrativePhone(citaCompleta));
   } catch (error) {
     return next(error);
   }
@@ -312,9 +342,28 @@ const actualizarCita = async (req, res, next) => {
     await transaction.commit();
     const citaCompleta = await Cita.findByPk(cita.id, { include: includeCita });
     void syncAppointment(citaCompleta);
-    return res.json(citaCompleta);
+    return res.json(await enrichRecordsWithAdministrativePhone(citaCompleta));
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
+    return next(error);
+  }
+};
+
+const reducirProgramacion = async (req, res, next) => {
+  try {
+    const result = await sequelize.transaction(async (transaction) => {
+      const historia = await HistoriaClinica.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!historia) throw Object.assign(new Error('Historia clinica no encontrada'), { status: 404 });
+      const evaluacion = await EvaluacionFinal.findOne({ where: { historia_clinica_id: historia.id }, transaction, lock: transaction.LOCK.UPDATE });
+      if (!evaluacion) throw Object.assign(new Error('La historia clinica no tiene evaluacion final'), { status: 400 });
+      const actual = Number(evaluacion.sesiones_contratadas || 0);
+      if (actual <= 1) throw Object.assign(new Error('El tratamiento debe conservar al menos una sesion indicada'), { status: 400 });
+      await synchronizeTreatmentTotal({ historyId: historia.id, total: actual - 1, transaction, changedBy: req.usuario.nombre || req.usuario.usuario || 'Sistema' });
+      return resumenProgramacion(historia.id, transaction);
+    });
+    return res.json(result);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ message: error.message });
     return next(error);
   }
 };
@@ -323,6 +372,9 @@ const eliminarCita = async (req, res, next) => {
   try {
     const cita = await Cita.findByPk(req.params.id);
     if (!cita) return res.status(404).json({ message: 'Cita no encontrada' });
+    if (cita.sesion_id || ['Atendida', 'No asistio', 'Falto'].includes(cita.estado)) {
+      return res.status(409).json({ message: 'No se puede eliminar una cita que ya tiene atencion o asistencia registrada' });
+    }
 
     const googleEventId = cita.google_event_id;
     await cita.destroy();
@@ -350,7 +402,7 @@ const cambiarEstadoCita = async (req, res, next) => {
     // La actualizacion local ya fue confirmada. Google Calendar se sincroniza
     // en segundo plano para no retrasar el refresco de la agenda.
     void syncAppointment(citaCompleta);
-    return res.json(citaCompleta);
+    return res.json(await enrichRecordsWithAdministrativePhone(citaCompleta));
   } catch (error) {
     if (!transaction.finished) await transaction.rollback();
     return next(error);
@@ -368,7 +420,7 @@ const listarCitasPaciente = async (req, res, next) => {
       include: includeCita,
       order: [['fecha', 'DESC'], ['hora_inicio', 'ASC']]
     });
-    return res.json(citas);
+    return res.json(await enrichRecordsWithAdministrativePhone(citas));
   } catch (error) {
     return next(error);
   }
@@ -383,7 +435,7 @@ const listarCalendario = async (req, res, next) => {
       include: includeCitaAgenda,
       order: [['fecha', 'ASC'], ['hora_inicio', 'ASC']]
     });
-    return res.json(citas);
+    return res.json(await enrichRecordsWithAdministrativePhone(citas));
   } catch (error) {
     return next(error);
   }
@@ -415,7 +467,7 @@ const listarPeriodo = (tipo) => async (req, res, next) => {
       include: includeCitaAgenda,
       order: [['fecha', 'ASC'], ['hora_inicio', 'ASC']]
     });
-    return res.json(citas);
+    return res.json(await enrichRecordsWithAdministrativePhone(citas));
   } catch (error) {
     return next(error);
   }
@@ -433,5 +485,5 @@ module.exports = {
   listarCitasHoy: listarPeriodo('hoy'),
   listarCitasSemana: listarPeriodo('semana'),
   listarCitasMes: listarPeriodo('mes')
-  , obtenerProgramacionHistoria, validarDisponibilidad, crearProgramacion, validarSolapamiento
+  , obtenerProgramacionHistoria, validarDisponibilidad, crearProgramacion, reducirProgramacion, validarSolapamiento, validarSolapamientoProgramaciones
 };

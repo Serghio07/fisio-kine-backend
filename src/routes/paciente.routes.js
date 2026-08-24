@@ -9,6 +9,7 @@ const {
   obtenerPaciente,
   obtenerSeccionPaciente,
   crearPaciente,
+  crearPacienteConContactos,
   actualizarPaciente,
   eliminarPaciente,
   reactivarPaciente
@@ -22,6 +23,7 @@ router.use(autenticar, filtrarRespuestaFinanciera);
 router.get('/', listarPacientes);
 router.get('/pendientes-whatsapp', autorizarRoles('admin', 'personal'), listarPendientesWhatsapp);
 router.get('/validar-duplicados', validarDuplicados);
+router.post('/con-contactos', autorizarRoles('admin', 'personal'), crearPacienteConContactos);
 router.get('/:id/resumen', resumenPaciente);
 router.post('/:id/resumen/auditoria', auditarResumenPaciente);
 router.get('/:id/citas', listarCitasPaciente);

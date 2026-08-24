@@ -5,9 +5,10 @@ const {
 } = require('../models');
 const { BOLIVIA_TIME_ZONE, boliviaDate } = require('../utils/boliviaDateTime');
 
-const boliviaRange = (fecha) => ({
-  [Op.between]: [new Date(`${fecha}T00:00:00-04:00`), new Date(`${fecha}T23:59:59.999-04:00`)]
+const boliviaRange = (fechaInicio, fechaFin = fechaInicio) => ({
+  [Op.between]: [new Date(`${fechaInicio}T00:00:00-04:00`), new Date(`${fechaFin}T23:59:59.999-04:00`)]
 });
+const dateRange = (fechaInicio, fechaFin = fechaInicio) => ({ [Op.between]: [fechaInicio, fechaFin] });
 const time = (value) => value ? new Intl.DateTimeFormat('es-BO', { timeZone: BOLIVIA_TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value)) : 'Sin hora';
 const name = (patient) => [patient?.nombres, patient?.apellidos].filter(Boolean).join(' ') || 'Paciente no disponible';
 const staffName = (user) => user?.ficha_personal?.nombre_mostrado || user?.nombre || user?.usuario || 'Sin registrar';
@@ -20,22 +21,22 @@ const sessionInclude = [
   { model: Usuario, as: 'registrado_por', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }
 ];
 
-const getDailyData = async (fecha) => {
+const getDailyData = async (fechaInicio, fechaFin = fechaInicio) => {
   const [sessions, histories, reports, payments, concepts, newPatients, activities, tasks, manualObservations] = await Promise.all([
-    Sesion.findAll({ where: { fecha, anulada: false }, include: sessionInclude, order: [['created_at', 'DESC']] }),
-    HistoriaClinica.findAll({ where: { created_at: boliviaRange(fecha), anulada: false }, include: [{ model: Paciente, as: 'paciente' }, { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }] }),
-    InformeMedico.findAll({ where: { fecha }, include: [{ model: Paciente, as: 'paciente' }, { model: HistoriaClinica, as: 'historia_clinica' }] }),
-    MovimientoPago.findAll({ where: { fecha, estado: 'Activo' }, include: [{ model: Usuario, as: 'recibido_por', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: ConceptoCobro, as: 'concepto', include: [{ model: Paciente, as: 'paciente' }, { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'fecha_evaluacion'] }, { model: Sesion, as: 'sesion', attributes: ['id', 'numero_sesion', 'fecha'] }, { model: MovimientoPago, as: 'movimientos', required: false, where: { estado: 'Activo' } }] }], order: [['hora', 'DESC']] }),
+    Sesion.findAll({ where: { fecha: dateRange(fechaInicio, fechaFin), anulada: false }, include: sessionInclude, order: [['fecha', 'DESC'], ['created_at', 'DESC']] }),
+    HistoriaClinica.findAll({ where: { created_at: boliviaRange(fechaInicio, fechaFin), anulada: false }, include: [{ model: Paciente, as: 'paciente' }, { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }] }),
+    InformeMedico.findAll({ where: { fecha: dateRange(fechaInicio, fechaFin) }, include: [{ model: Paciente, as: 'paciente' }, { model: HistoriaClinica, as: 'historia_clinica' }] }),
+    MovimientoPago.findAll({ where: { fecha: dateRange(fechaInicio, fechaFin), estado: 'Activo' }, include: [{ model: Usuario, as: 'recibido_por', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: ConceptoCobro, as: 'concepto', include: [{ model: Paciente, as: 'paciente' }, { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'fecha_evaluacion'] }, { model: Sesion, as: 'sesion', attributes: ['id', 'numero_sesion', 'fecha'] }, { model: MovimientoPago, as: 'movimientos', required: false, where: { estado: 'Activo' } }] }], order: [['fecha', 'DESC'], ['hora', 'DESC']] }),
     ConceptoCobro.findAll({ where: { activo: true }, include: [{ model: Paciente, as: 'paciente' }, { model: HistoriaClinica, as: 'historia_clinica', attributes: ['id', 'diagnostico_medico', 'fecha_evaluacion'] }, { model: Sesion, as: 'sesion', attributes: ['id', 'numero_sesion', 'fecha'] }, { model: MovimientoPago, as: 'movimientos', required: false, where: { estado: 'Activo' } }] }),
-    Paciente.findAll({ where: { created_at: boliviaRange(fecha), estado: true } }),
-    ActividadSistema.findAll({ where: { fecha }, include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: Paciente, as: 'paciente' }], order: [['hora', 'DESC']] }),
-    TareaPersonal.findAll({ where: { fecha, estado: { [Op.ne]: 'cancelada' } }, include: [{ model: Personal, as: 'personal' }, { model: Usuario, as: 'asignado_a', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: Paciente, as: 'paciente' }] }),
-    ObservacionDiaria.findAll({ where: { fecha, activo: true }, include: [{ model: Paciente, as: 'paciente' }, { model: Usuario, as: 'responsable', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }], order: [['hora', 'DESC']] })
+    Paciente.findAll({ where: { created_at: boliviaRange(fechaInicio, fechaFin), estado: true } }),
+    ActividadSistema.findAll({ where: { fecha: dateRange(fechaInicio, fechaFin) }, include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: Paciente, as: 'paciente' }], order: [['fecha', 'DESC'], ['hora', 'DESC']] }),
+    TareaPersonal.findAll({ where: { fecha: dateRange(fechaInicio, fechaFin), estado: { [Op.ne]: 'cancelada' } }, include: [{ model: Personal, as: 'personal' }, { model: Usuario, as: 'asignado_a', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }, { model: Paciente, as: 'paciente' }] }),
+    ObservacionDiaria.findAll({ where: { fecha: dateRange(fechaInicio, fechaFin), activo: true }, include: [{ model: Paciente, as: 'paciente' }, { model: Usuario, as: 'responsable', attributes: ['id', 'nombre', 'usuario'], include: [{ model: Personal, as: 'ficha_personal' }] }], order: [['fecha', 'DESC'], ['hora', 'DESC']] })
   ]);
 
   const sessionsJson = sessions.map((item) => item.toJSON());
   const attentions = sessionsJson.map((session) => ({
-    id: session.id, hora: time(session.created_at), paciente: name(session.paciente), ci: session.paciente?.ci,
+    id: session.id, fecha: session.fecha, hora: time(session.created_at), paciente: name(session.paciente), ci: session.paciente?.ci,
     historia: session.historia_clinica?.diagnostico_medico || session.historia_clinica?.motivo_consulta || 'Sin diagnóstico',
     historia_id: session.historia_clinica_id, paciente_id: session.paciente_id, numero_sesion: session.numero_sesion,
     asistencia: session.asistencia, profesional: session.profesional_responsable || staffName(session.registrado_por),
@@ -48,23 +49,24 @@ const getDailyData = async (fecha) => {
     const allActive = (item.concepto?.movimientos || []).filter((row) => row.estado === 'Activo');
     const paid = allActive.reduce((sum, row) => sum + Number(row.monto || 0), 0);
     const remaining = Math.max(Number(item.concepto?.monto_esperado || 0) - paid, 0);
-    return { id: item.id, concepto_id: item.concepto_cobro_id, hora: String(item.hora || '').slice(0, 5), paciente: name(item.concepto?.paciente), concepto: item.concepto?.detalle, historia: item.concepto?.historia_clinica?.diagnostico_medico || 'Sin historia', sesion: item.concepto?.sesion?.numero_sesion, monto: money(item.monto), metodo: item.metodo, saldo: money(remaining), estado: remaining > 0 ? 'Parcial' : 'Pagado', recibido_por: staffName(item.recibido_por), recibo: item.numero_recibo, comprobante: item.numero_comprobante, observacion: item.observacion };
+    return { id: item.id, concepto_id: item.concepto_cobro_id, fecha: item.fecha, hora: String(item.hora || '').slice(0, 5), paciente: name(item.concepto?.paciente), concepto: item.concepto?.detalle, historia: item.concepto?.historia_clinica?.diagnostico_medico || 'Sin historia', sesion: item.concepto?.sesion?.numero_sesion, monto: money(item.monto), metodo: item.metodo, saldo: money(remaining), estado: remaining > 0 ? 'Parcial' : 'Pagado', recibido_por: staffName(item.recibido_por), recibo: item.numero_recibo, comprobante: item.numero_comprobante, observacion: item.observacion };
   });
 
   const debts = concepts.map((concept) => {
     const item = concept.toJSON(); const paid = (item.movimientos || []).reduce((sum, movement) => sum + Number(movement.monto || 0), 0); const balance = money(Math.max(Number(item.monto_esperado || 0) - paid, 0));
     if (balance <= 0 || item.exonerado) return null;
     const last = [...(item.movimientos || [])].sort((a, b) => `${b.fecha} ${b.hora}`.localeCompare(`${a.fecha} ${a.hora}`))[0];
-    return { id: item.id, paciente: name(item.paciente), historia: item.historia_clinica?.diagnostico_medico || 'Sin historia', concepto: item.detalle, fecha_origen: item.fecha_origen, monto_esperado: money(item.monto_esperado), total_pagado: money(paid), saldo: balance, ultimo_pago: last?.fecha || null, estado: paid > 0 ? 'Parcial' : 'Pendiente', origen: item.fecha_origen === fecha ? 'Generada hoy' : 'Anterior' };
+    const generatedInRange = item.fecha_origen >= fechaInicio && item.fecha_origen <= fechaFin;
+    return { id: item.id, paciente: name(item.paciente), historia: item.historia_clinica?.diagnostico_medico || 'Sin historia', concepto: item.detalle, fecha_origen: item.fecha_origen, monto_esperado: money(item.monto_esperado), total_pagado: money(paid), saldo: balance, ultimo_pago: last?.fecha || null, estado: paid > 0 ? 'Parcial' : 'Pendiente', origen: generatedInRange ? 'Generada hoy' : 'Anterior' };
   }).filter(Boolean).sort((a, b) => b.saldo - a.saldo);
 
   const evolutions = attentions.map((attention) => ({ ...attention, procedimiento: attention.observacion || 'Sin registrar', estado: attention.evolutivo }));
   const drugs = sessionsJson.flatMap((session) => {
     if (session.anulada || session.asistencia !== 'asistio') return [];
     const farmacos = Array.isArray(session.farmacos) ? session.farmacos.filter((item) => item.estado !== 'anulado') : [];
-    if (farmacos.length) return farmacos.map((farmaco) => ({ id: session.id, paciente_id: session.paciente_id, hora: time(session.created_at), paciente: name(session.paciente), historia: session.historia_clinica?.diagnostico_medico || 'Sin historia', sesion: session.numero_sesion, farmaco: farmaco.nombre, dosis: farmaco.presentacion_dosis || 'Sin registrar', via: farmaco.via || 'Sin registrar', profesional: session.profesional_responsable || staffName(session.registrado_por), observacion: farmaco.observacion || farmaco.motivo_clinico }));
+    if (farmacos.length) return farmacos.map((farmaco) => ({ id: session.id, paciente_id: session.paciente_id, fecha: session.fecha, hora: time(session.created_at), paciente: name(session.paciente), historia: session.historia_clinica?.diagnostico_medico || 'Sin historia', sesion: session.numero_sesion, farmaco: farmaco.nombre, dosis: farmaco.presentacion_dosis || 'Sin registrar', via: farmaco.via || 'Sin registrar', precio_unitario: money(farmaco.precio_unitario), subtotal: money(farmaco.subtotal ?? Number(farmaco.cantidad || 0) * Number(farmaco.precio_unitario || 0)), profesional: session.profesional_responsable || staffName(session.registrado_por), observacion: farmaco.observacion || farmaco.motivo_clinico }));
     if (!(session.aplica_farmacos || session.inyectable_nombre || session.observacion_farmacos)) return [];
-    return [{ id: session.id, paciente_id: session.paciente_id, hora: time(session.created_at), paciente: name(session.paciente), historia: session.historia_clinica?.diagnostico_medico || 'Sin historia', sesion: session.numero_sesion, farmaco: session.inyectable_nombre || session.observacion_farmacos || 'Fármaco registrado', dosis: session.inyectable_dosis || 'Sin registrar', via: 'Sin registrar', profesional: session.profesional_responsable || staffName(session.registrado_por), observacion: session.observacion_farmacos }];
+    return [{ id: session.id, paciente_id: session.paciente_id, fecha: session.fecha, hora: time(session.created_at), paciente: name(session.paciente), historia: session.historia_clinica?.diagnostico_medico || 'Sin historia', sesion: session.numero_sesion, farmaco: session.inyectable_nombre || session.observacion_farmacos || 'Fármaco registrado', dosis: session.inyectable_dosis || 'Sin registrar', via: 'Sin registrar', profesional: session.profesional_responsable || staffName(session.registrado_por), observacion: session.observacion_farmacos }];
   });
 
   const observations = [
@@ -105,10 +107,13 @@ const getDailyData = async (fecha) => {
 
 exports.obtenerResumenDiario = async (req, res, next) => {
   try {
-    const fecha = req.query.fecha || boliviaDate(); const section = req.query.seccion || 'resumen';
-    const data = await getDailyData(fecha);
+    const fechaInicio = req.query.fecha_inicio || req.query.fecha || boliviaDate();
+    const fechaFin = req.query.fecha_fin || fechaInicio;
+    if (fechaInicio > fechaFin) return res.status(400).json({ message: 'La fecha inicial no puede ser posterior a la fecha final.' });
+    const section = req.query.seccion || 'resumen';
+    const data = await getDailyData(fechaInicio, fechaFin);
     const counts = { resumen: 1, atenciones: data.attentions.length, pagos: data.payments.length, deudas: data.debts.length, evolutivos: data.evolutions.length, farmacos: data.drugs.length, personal: data.personnel.length, observaciones: data.observations.length };
-    const response = { fecha, indicadores: data.indicators, contadores: counts };
+    const response = { fecha: fechaInicio, fecha_inicio: fechaInicio, fecha_fin: fechaFin, indicadores: data.indicators, contadores: counts };
     if (section === 'resumen') Object.assign(response, { ultimas_atenciones: data.attentions.slice(0, 5), ultimos_pagos: data.payments.slice(0, 5), alertas: data.alerts });
     else if (section === 'todo') Object.assign(response, data);
     else response[section] = data[section === 'atenciones' ? 'attentions' : section === 'pagos' ? 'payments' : section === 'deudas' ? 'debts' : section === 'evolutivos' ? 'evolutions' : section === 'farmacos' ? 'drugs' : section === 'personal' ? 'personnel' : 'observations'];

@@ -1,0 +1,5 @@
+const test = require('node:test'); const assert = require('node:assert/strict'); const migration = require('../../migrations/20260822000200-add-whatsapp-safe-registration-steps');
+const build = (total = 0) => { const sql = []; return { sql, queryInterface: { sequelize: { transaction: async (callback) => callback({}), query: async (value) => { sql.push(value); return /SELECT count/.test(value) ? [[{ total }]] : [[]]; } } } }; };
+test('up agrega estados 6C y conserva anteriores', async () => { const { queryInterface, sql } = build(); await migration.up(queryInterface); const value = sql.join('\n'); for (const step of migration.NEW_STEPS) assert.match(value, new RegExp(step)); assert.match(value, /ESPERANDO_SELECCION_PACIENTE/); });
+test('down restaura constraint si es seguro', async () => { const { queryInterface, sql } = build(); await migration.down(queryInterface); assert.match(sql.join('\n'), /ADD CONSTRAINT/); });
+test('down bloquea estados exclusivos', async () => { const { queryInterface } = build(2); await assert.rejects(() => migration.down(queryInterface), /Rollback abortado/); });
