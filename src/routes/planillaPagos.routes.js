@@ -1,9 +1,9 @@
 const router = require('express').Router();
 const autenticar = require('../middlewares/auth.middleware');
-const { soloAdministradorFinanciero } = require('../middlewares/financialAccess.middleware');
+const { authorizeModule } = require('../middlewares/permission.middleware');
 const controller = require('../controllers/planillaPagos.controller');
 
-router.use(autenticar, soloAdministradorFinanciero);
+router.use(autenticar, authorizeModule('finanzas'));
 router.get('/', controller.listar);
 router.get('/resumen', controller.resumenFinanciero);
 router.get('/pacientes/:pacienteId/resumen-financiero', controller.resumenFinancieroPaciente);

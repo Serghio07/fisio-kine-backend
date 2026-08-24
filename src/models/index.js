@@ -1,6 +1,7 @@
 const sequelize = require('../config/database');
 const GoogleCalendarIntegracion = require('./GoogleCalendarIntegracion');
 const Usuario = require('./Usuario');
+const RolPermiso = require('./RolPermiso');
 const Paciente = require('./Paciente');
 const { Contacto, CONTACT_DOCUMENT_TYPES } = require('./Contacto');
 const { PacienteContacto, PARENTESCOS_CONTACTO } = require('./PacienteContacto');
@@ -325,6 +326,7 @@ module.exports = {
   sequelize,
   GoogleCalendarIntegracion,
   Usuario,
+  RolPermiso,
   Paciente,
   Contacto,
   CONTACT_DOCUMENT_TYPES,
