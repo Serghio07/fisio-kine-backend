@@ -56,6 +56,28 @@ test('las preguntas médicas generales y educativas llegan a Gemini', async () =
   }
 });
 
+test('el conocimiento general y la orientación financiera para ADMIN llegan a Gemini', async () => {
+  for (const message of ['Explícame qué es la fotosíntesis.', '¿Cómo funciona el arqueo y los pagos en Physio Active?']) {
+    let calls = 0;
+    const response = await processAssistantChat(
+      { message, context: { module: 'finanzas', screen: 'arqueos' }, conversation: [], user: { id: 1, rol: 'admin' }, usuario: {} },
+      { config: { enabled: true }, gemini: { request: async () => { calls += 1; return { text: 'Respuesta autorizada.' }; } } }
+    );
+    assert.equal(calls, 1, message);
+    assert.equal(response.source, 'gemini');
+  }
+});
+
+test('PERSONAL recibe orientación autorizada sobre Control financiero', async () => {
+  let calls = 0;
+  const response = await processAssistantChat(
+    { message: '¿Cómo funcionan los arqueos?', context: {}, conversation: [], user: { id: 2, rol: 'personal' }, usuario: {} },
+    { config: { enabled: true }, gemini: { request: async () => { calls += 1; return { text: 'Orientación financiera autorizada.' }; } } }
+  );
+  assert.equal(calls, 1);
+  assert.equal(response.source, 'gemini');
+});
+
 test('las solicitudes clínicas personalizadas se bloquean antes de Gemini', async () => {
   const questions = [
     '¿Qué diagnóstico tiene este paciente?',
@@ -101,7 +123,7 @@ test('maneja caída de Gemini sin exponer detalles y limita historial', async ()
   const response = await processAssistantChat({ message: 'Explícame el flujo del día', context: {}, conversation: [], user: { id: 1, rol: 'admin' }, usuario: {} }, { config: { enabled: true }, gemini: { request: async () => { throw new Error('SECRET RAW ERROR'); } } });
   assert.doesNotMatch(response.message, /SECRET|RAW/);
   const history = Array.from({ length: 12 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', text: 'x' }));
-  assert.equal(sanitizeConversation(history).length, 8);
+  assert.equal(sanitizeConversation(history).length, 12);
 });
 
 test('endpoint de chat exige autenticación', async () => {

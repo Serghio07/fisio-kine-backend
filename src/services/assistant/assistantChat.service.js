@@ -1,5 +1,6 @@
 const { requestGemini, completeAfterTools, getGeminiConfig, createGeminiClient } = require('./geminiClient.service');
 const { executeAssistantTool } = require('./assistantTools.service');
+const systemKnowledge = require('../../config/assistant/assistantSystemKnowledge');
 
 const SAFE_CONTEXTS = Object.freeze({
   dashboard: 'Panel principal: muestra indicadores operativos autorizados.',
@@ -11,10 +12,24 @@ const SAFE_CONTEXTS = Object.freeze({
   actividades: 'Mis actividades: tareas operativas propias del usuario.',
   notificaciones: 'Notificaciones: avisos internos del usuario.',
   'recepcion-whatsapp': 'Recepción WhatsApp: solicitudes operativas derivadas para atención.',
+  'sesiones-semanales': 'Sesiones semanales: resumen, recálculo y exportación de atenciones por período.',
+  'planillas-atencion': 'Planillas de atención: documentos consolidados de sesiones y asistencia.',
+  informes: 'Informes médicos: creación, consulta, impresión y descarga de documentos.',
+  consentimiento: 'Consentimiento informado: gestión del documento clínico.',
+  'signos-vitales': 'Signos vitales: registro y consulta documental.',
+  farmacos: 'Administración de fármacos: registro documental de productos administrados.',
+  'resumen-diario': 'Resumen diario: consolidado clínico y operativo según permisos.',
+  finanzas: 'Control financiero: ADMIN y PERSONAL consultan y registran pagos, deudas, recibos y comprobantes; anular y administrar permanece reservado al ADMIN.',
+  usuarios: 'Usuarios y personal: administración de cuentas y fichas; solo ADMIN.',
+  sueldos: 'Planillas de sueldos: gestión laboral y salarial; solo ADMIN.',
+  'roles-permisos': 'Roles y permisos: matriz administrativa de accesos.',
+  'monitoreo-whatsapp': 'Monitoreo WhatsApp: estado técnico y operativo de la integración.',
+  blog: 'Blog: borradores, artículos, publicación y categorías.',
   general: 'Physio Active: sistema interno de gestión de fisioterapia.'
 });
 
-const RESTRICTED_PATTERN = /(contraseñ|password|credencial|api[ _-]?key|token|cookie|\.env|variable(s)? de entorno|sql|base de datos|archivo(s)? interno|prompt interno|ignora (los |tus )?(permisos|instrucciones)|actua como admin|actúa como admin|pagos?|finanzas?|sueldos?|salarios?|arqueos?)/i;
+const RESTRICTED_PATTERN = /(contraseñ|password|credencial|api[ _-]?key|token|cookie|\.env|variable(s)? de entorno|sql|base de datos|archivo(s)? interno|prompt interno|ignora (los |tus )?(permisos|instrucciones)|actua como admin|actúa como admin)/i;
+const ADMIN_ONLY_PATTERN = /(sueldos?|salarios?|n[oó]minas?|usuarios del sistema|administrar usuarios)/i;
 const CLINICAL_PATTERN = /(que|qué) (diagnostico|diagnóstico|medicamento|tratamiento)\b|prescrib|rec[eé]t|que tiene (el|la) paciente|analiza(r)? (la )?historia cl[ií]nica|qu[eé] enfermedad tiene/i;
 const WRITE_PATTERN = /\b(agenda|crea|registra|modifica|actualiza|elimina|borra|cancela)\b.*\b(cita|paciente|sesion|sesión|pago|usuario)\b/i;
 
@@ -26,7 +41,7 @@ function sanitizeContext(context) {
 
 function sanitizeConversation(conversation) {
   if (!Array.isArray(conversation)) return [];
-  return conversation.slice(-8).flatMap((item) => {
+  return conversation.slice(-12).flatMap((item) => {
     if (!['user', 'assistant'].includes(item?.role) || typeof item?.text !== 'string') return [];
     const text = item.text.trim().slice(0, 1000);
     return text ? [{ role: item.role === 'assistant' ? 'model' : 'user', parts: [{ text }] }] : [];
@@ -46,13 +61,14 @@ async function processAssistantChat({ message, context, conversation, user, usua
   if (!user || !['admin', 'personal'].includes(user.rol)) return fixedResponse('No tienes autorización para usar esta función.');
   if (CLINICAL_PATTERN.test(message)) return fixedResponse('Puedo ayudarte a utilizar Physio Active, pero no puedo indicar diagnósticos, tratamientos ni medicamentos.');
   if (RESTRICTED_PATTERN.test(message)) return fixedResponse('No puedo ayudar con credenciales, configuración interna ni información administrativa restringida.');
+  if (user.rol !== 'admin' && ADMIN_ONLY_PATTERN.test(message)) return fixedResponse('La información financiera y salarial está disponible únicamente para usuarios administradores.');
   if (WRITE_PATTERN.test(message)) return fixedResponse('Las acciones de escritura todavía deben realizarse y confirmarse desde la pantalla correspondiente.', { type: 'navigate', route: '/citas', label: 'Abrir Agenda', permission: 'agenda' });
 
   const geminiConfig = dependencies.config || getGeminiConfig();
   if (!geminiConfig.enabled && !dependencies.gemini) return { ...fixedResponse('El asistente inteligente no está configurado actualmente.'), unavailable: true };
 
   const safeContext = sanitizeContext(context);
-  const identity = `Nombre: ${getSafeName(usuario)}. Rol funcional: ${user.rol === 'admin' ? 'Administrador' : 'Personal'}. Pantalla actual: ${safeContext.module} / ${safeContext.screen}. Conocimiento relevante: ${safeContext.guidance}`;
+  const identity = `Nombre: ${getSafeName(usuario)}. Rol funcional: ${user.rol === 'admin' ? 'Administrador' : 'Personal'}. Pantalla actual: ${safeContext.module} / ${safeContext.screen}. Conocimiento relevante de la pantalla: ${safeContext.guidance}\n\n${systemKnowledge}`;
   const contents = [...sanitizeConversation(conversation), { role: 'user', parts: [{ text: `${identity}\nConsulta actual: ${message}` }] }];
   try {
     const client = dependencies.client || (dependencies.gemini ? null : await createGeminiClient(geminiConfig));

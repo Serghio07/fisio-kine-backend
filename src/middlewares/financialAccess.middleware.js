@@ -91,6 +91,26 @@ const sanearEntradaFinanciera = (req, res, next) => {
   return next();
 };
 
+const CAMPOS_PAGO_SESION = Object.freeze([
+  'metodo_pago',
+  'estado_pago',
+  'observacion_pago',
+  'motivo_sin_costo',
+  'monto_sesion',
+  'monto_pagado',
+  'saldo_pendiente'
+]);
+
+const sanearEntradaSesionConPago = (req, res, next) => {
+  if (esPersonal(req) && req.body && typeof req.body === 'object') {
+    const payment = Object.fromEntries(CAMPOS_PAGO_SESION
+      .filter((key) => Object.prototype.hasOwnProperty.call(req.body, key))
+      .map((key) => [key, req.body[key]]));
+    req.body = { ...limpiarFinanzas(req.body), ...payment };
+  }
+  return next();
+};
+
 const registrarAccesoDenegado = (req, detalle) => {
   const usuario = req.user || req.usuario;
   if (!usuario?.id) return;
@@ -135,6 +155,7 @@ module.exports = {
   limpiarFinanzas,
   filtrarRespuestaFinanciera,
   sanearEntradaFinanciera,
+  sanearEntradaSesionConPago,
   registrarAccesoDenegado,
   soloAdministradorFinanciero,
   bloquearSeccionFinanciera

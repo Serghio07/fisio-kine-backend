@@ -8,7 +8,7 @@ const PERSONAL_DEFAULTS = Object.freeze({
   dashboard:['view'],pacientes:['view','create','edit','print'],historias:CLINICAL,evolutivos:['view','create','edit'],agenda:ALL,
   recepcionWhatsapp:['view','edit'],monitoreoWhatsapp:[],sesiones:['view','create','edit','print'],sesionesSemanales:['view','create','edit','print','export'],
   documentosClinicos:CLINICAL,planillasAtencion:CLINICAL,informes:CLINICAL,actividadesPropias:['view','create','edit','annul'],
-  resumenDiarioClinico:['view','create','edit','print','export'],finanzas:[],usuarios:[],personalAdministracion:[],rolesPermisos:[],sueldos:[],
+  resumenDiarioClinico:['view','create','edit','print','export'],finanzas:['view','create','edit','print','export'],usuarios:[],personalAdministracion:[],rolesPermisos:[],sueldos:[],
   blogAdministracion:['view','create','edit','publish'],galeria:ALL,blogCategorias:[],auditoria:[],configuracion:[]
 });
 const ADMIN_DEFAULTS = Object.freeze({
@@ -25,6 +25,7 @@ const effectivePermissions = async (role) => {
   if (role !== 'personal') return result;
   const rows = await RolPermiso.findAll({ where: { rol: role }, attributes: ['modulo', 'acciones'] });
   rows.forEach((row) => { if (MODULES.includes(row.modulo)) result[row.modulo] = row.acciones.filter((action) => ACTIONS.includes(action)); });
+  result.finanzas = [...new Set([...(result.finanzas || []), 'view', 'create', 'edit', 'print', 'export'])];
   return result;
 };
 const savePermissions = async (role, permissions, userId) => {

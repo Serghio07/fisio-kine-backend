@@ -1,14 +1,62 @@
-const { ConceptoCobro, HistoriaClinica, MovimientoPago, MovimientoPagoAuditoria } = require('../models');
+const { ArqueoPago, ConceptoCobro, HistoriaClinica, MovimientoPago, MovimientoPagoAuditoria } = require('../models');
 const { calculatePaymentState } = require('./paymentFinancialState.service');
 
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+const sessionReceipt = (sessionId) => `REC-SES-${String(sessionId).padStart(6, '0')}`;
+const paymentMethod = (method) => ['Efectivo', 'QR', 'Transferencia', 'Tarjeta', 'Otro'].includes(method) ? method : 'Otro';
 
-const syncPaymentState = async (concepto, session, transaction) => {
+const syncPaymentState = async (concepto, transaction) => {
   const movements = await MovimientoPago.findAll({ where: { concepto_cobro_id: concepto.id, estado: 'Activo' }, transaction });
   const total = money(movements.reduce((sum, item) => sum + Number(item.monto || 0), 0));
   const financial = calculatePaymentState(concepto, total);
   await concepto.update({ estado: financial.estado }, { transaction });
   return { total, saldo: financial.saldo, estado: financial.estado };
+};
+
+const syncSessionPayment = async (session, concept, transaction) => {
+  const receipt = sessionReceipt(session.id);
+  const desiredAmount = money(session.monto_pagado);
+  const desiredMethod = paymentMethod(session.metodo_pago);
+  const movement = await MovimientoPago.findOne({ where: { concepto_cobro_id: concept.id, numero_recibo: receipt }, transaction, lock: transaction?.LOCK?.UPDATE });
+
+  if (!movement) {
+    if (!(desiredAmount > 0) || !session.usuario_id) return;
+    const current = await MovimientoPago.count({ where: { concepto_cobro_id: concept.id }, transaction });
+    if (current) return;
+    const created = await MovimientoPago.create({
+      concepto_cobro_id: concept.id, usuario_receptor_id: session.usuario_id, fecha: session.fecha, hora: '12:00:00',
+      monto: desiredAmount, metodo: desiredMethod, observacion: session.observacion_pago || 'Pago registrado desde Sesiones',
+      numero_recibo: receipt, estado: 'Activo'
+    }, { transaction });
+    await MovimientoPagoAuditoria.create({ movimiento_pago_id: created.id, usuario_id: session.usuario_id, accion: 'Registro desde sesión', valor_nuevo: created.toJSON() }, { transaction });
+    return;
+  }
+
+  const desiredActive = desiredAmount > 0;
+  const paymentChanged = money(movement.monto) !== desiredAmount || movement.metodo !== desiredMethod
+    || movement.fecha !== session.fecha || (movement.estado === 'Activo') !== desiredActive;
+  if (!paymentChanged) return;
+
+  const arqueo = movement.arqueo_id ? await ArqueoPago.findByPk(movement.arqueo_id, { transaction }) : null;
+  if (arqueo?.estado === 'Cerrado') {
+    throw Object.assign(new Error('El pago de esta sesión pertenece a un arqueo cerrado. Reabra el arqueo antes de cambiar el método, monto, fecha o estado del pago.'), { status: 409 });
+  }
+
+  const previous = movement.toJSON();
+  const arqueoId = arqueo?.estado === 'Reabierto' ? null : movement.arqueo_id;
+  await movement.update(desiredActive ? {
+    fecha: session.fecha, monto: desiredAmount, metodo: desiredMethod,
+    observacion: session.observacion_pago || 'Pago registrado desde Sesiones', estado: 'Activo', arqueo_id: arqueoId,
+    motivo_anulacion: null, anulado_por_id: null, anulado_en: null
+  } : {
+    estado: 'Anulado', motivo_anulacion: 'Pago actualizado desde la sesión', anulado_por_id: session.usuario_id,
+    anulado_en: new Date(), arqueo_id: arqueoId
+  }, { transaction });
+  await MovimientoPagoAuditoria.create({
+    movimiento_pago_id: movement.id, usuario_id: session.usuario_id,
+    accion: desiredActive ? 'Edición desde sesión' : 'Anulación desde sesión',
+    valor_anterior: previous, valor_nuevo: movement.toJSON()
+  }, { transaction });
 };
 
 const sincronizarConceptoSesion = async (session, transaction, { importarPago = false } = {}) => {
@@ -17,15 +65,10 @@ const sincronizarConceptoSesion = async (session, transaction, { importarPago = 
   const [concept, created] = await ConceptoCobro.findOrCreate({
     where: { sesion_id: session.id },
     defaults: {
-      paciente_id: session.paciente_id,
-      historia_clinica_id: session.historia_clinica_id,
-      fecha_origen: session.fecha,
-      tipo: 'Sesión de fisioterapia',
-      detalle: `Sesión ${session.numero_sesion}${history?.diagnostico_medico ? ` — ${history.diagnostico_medico}` : ''}`,
-      monto_esperado: money(session.monto_sesion),
-      profesional_responsable: session.profesional_responsable,
-      exonerado: session.estado_pago === 'Sin costo',
-      activo: !session.anulada
+      paciente_id: session.paciente_id, historia_clinica_id: session.historia_clinica_id, fecha_origen: session.fecha,
+      tipo: 'Sesión de fisioterapia', detalle: `Sesión ${session.numero_sesion}${history?.diagnostico_medico ? ` — ${history.diagnostico_medico}` : ''}`,
+      monto_esperado: money(session.monto_sesion), profesional_responsable: session.profesional_responsable,
+      exonerado: session.estado_pago === 'Sin costo', activo: !session.anulada
     },
     transaction
   });
@@ -33,34 +76,14 @@ const sincronizarConceptoSesion = async (session, transaction, { importarPago = 
   const activePayments = created ? 0 : await MovimientoPago.count({ where: { concepto_cobro_id: concept.id, estado: 'Activo' }, transaction });
   if (wantsExemption && (activePayments > 0 || money(session.monto_pagado) > 0)) throw Object.assign(new Error('No se puede exonerar un concepto con pagos activos. Anule primero la operación o el pago correspondiente.'), { status: 409 });
   if (!created) await concept.update({
-    paciente_id: session.paciente_id,
-    historia_clinica_id: session.historia_clinica_id,
-    fecha_origen: session.fecha,
+    paciente_id: session.paciente_id, historia_clinica_id: session.historia_clinica_id, fecha_origen: session.fecha,
     detalle: `Sesión ${session.numero_sesion}${history?.diagnostico_medico ? ` — ${history.diagnostico_medico}` : ''}`,
-    monto_esperado: money(session.monto_sesion),
-    profesional_responsable: session.profesional_responsable,
-    exonerado: wantsExemption,
-    activo: !session.anulada
+    monto_esperado: money(session.monto_sesion), profesional_responsable: session.profesional_responsable,
+    exonerado: wantsExemption, activo: !session.anulada
   }, { transaction });
 
-  if ((created || importarPago) && money(session.monto_pagado) > 0 && session.usuario_id) {
-    const current = await MovimientoPago.count({ where: { concepto_cobro_id: concept.id }, transaction });
-    if (!current) {
-      const movement = await MovimientoPago.create({
-      concepto_cobro_id: concept.id,
-      usuario_receptor_id: session.usuario_id,
-      fecha: session.fecha,
-      hora: '12:00:00',
-      monto: money(session.monto_pagado),
-      metodo: ['Efectivo', 'QR', 'Transferencia', 'Tarjeta', 'Otro'].includes(session.metodo_pago) ? session.metodo_pago : 'Otro',
-      observacion: session.observacion_pago || 'Pago registrado desde Sesiones',
-      numero_recibo: `REC-SES-${String(session.id).padStart(6, '0')}`,
-      estado: 'Activo'
-      }, { transaction });
-      await MovimientoPagoAuditoria.create({ movimiento_pago_id: movement.id, usuario_id: session.usuario_id, accion: 'Registro desde sesión', valor_nuevo: movement.toJSON() }, { transaction });
-    }
-  }
-  return syncPaymentState(concept, session, transaction);
+  if (created || importarPago) await syncSessionPayment(session, concept, transaction);
+  return syncPaymentState(concept, transaction);
 };
 
 module.exports = { sincronizarConceptoSesion };

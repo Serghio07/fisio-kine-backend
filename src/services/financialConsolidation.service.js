@@ -64,6 +64,87 @@ const variation = (current, previous) => {
   return { actual, anterior, diferencia: difference, variacion_porcentaje: percentage, direccion: difference > 0 ? 'sube' : difference < 0 ? 'baja' : 'igual', etiqueta: `${percentage > 0 ? '+' : ''}${percentage.toLocaleString('es-BO', { maximumFractionDigits: 2 })}%` };
 };
 
+const reportPaymentState = ({ activo = true, exonerado = false, estado, monto_esperado, monto_pagado }) => {
+  const expected = money(monto_esperado);
+  const paid = money(monto_pagado);
+  const balance = money(Math.max(expected - paid, 0));
+  if (!activo || String(estado || '').toLowerCase() === 'anulado') return 'ANULADO';
+  if (exonerado || String(estado || '').toLowerCase() === 'exonerado') return 'EXONERADO';
+  if (paid > expected) return 'SALDO A FAVOR';
+  if (expected > 0 && balance === 0) return 'CANCELADO';
+  if (paid > 0 && balance > 0) return 'PENDIENTE';
+  return 'NO CANCELADO';
+};
+
+const periodObligations = async (from, to) => {
+  const rows = await sequelize.query(`SELECT
+      c.id AS concepto_id,COALESCE(pay.fecha_ultimo_pago_periodo,c.fecha_origen) AS fecha,p.id AS paciente_id,
+      TRIM(CONCAT(COALESCE(p.nombres,''),' ',COALESCE(p.apellidos,''))) AS paciente,
+      COALESCE(p.numero_documento,p.ci,'Sin documento') AS documento,
+      c.historia_clinica_id AS historia_id,c.sesion_id,
+      COALESCE(s.profesional_responsable,c.profesional_responsable,'Sin registrar') AS profesional,
+      c.monto_esperado,c.estado AS estado_interno,c.exonerado,c.activo,
+      (c.fecha_origen BETWEEN :from AND :to) AS originado_periodo,
+      COALESCE(pay.monto_pagado_periodo,0) AS monto_pagado,
+      COALESCE(pay.monto_pagado_acumulado,0) AS monto_pagado_acumulado,
+      GREATEST(c.monto_esperado-COALESCE(pay.monto_pagado_acumulado,0),0) AS saldo_pendiente,
+      COALESCE(pay.metodos_pago,ARRAY[]::text[]) AS metodos_pago,
+      COALESCE(pay.recibos,ARRAY[]::text[]) AS recibos,
+      pay.fecha_ultimo_pago
+    FROM conceptos_cobro c
+    JOIN pacientes p ON p.id=c.paciente_id
+    LEFT JOIN historias_clinicas h ON h.id=c.historia_clinica_id
+    LEFT JOIN sesiones s ON s.id=c.sesion_id
+    LEFT JOIN LATERAL (
+      SELECT SUM(m.monto) AS monto_pagado_acumulado,
+        SUM(m.monto) FILTER (WHERE m.fecha BETWEEN :from AND :to) AS monto_pagado_periodo,
+        MAX(m.fecha) AS fecha_ultimo_pago,
+        MAX(m.fecha) FILTER (WHERE m.fecha BETWEEN :from AND :to) AS fecha_ultimo_pago_periodo,
+        ARRAY_AGG(DISTINCT m.metodo ORDER BY m.metodo) FILTER (WHERE m.metodo IS NOT NULL AND m.fecha BETWEEN :from AND :to) AS metodos_pago,
+        ARRAY_AGG(DISTINCT COALESCE(o.numero_recibo,m.numero_recibo) ORDER BY COALESCE(o.numero_recibo,m.numero_recibo))
+          FILTER (WHERE COALESCE(o.numero_recibo,m.numero_recibo) IS NOT NULL AND m.fecha BETWEEN :from AND :to) AS recibos
+      FROM movimientos_pago m
+      LEFT JOIN operaciones_pago o ON o.id=m.operacion_pago_id
+      WHERE m.concepto_cobro_id=c.id AND m.estado='Activo'
+    ) pay ON TRUE
+    WHERE c.activo=TRUE
+      AND c.estado<>'Anulado'
+      AND c.monto_esperado>0
+      AND (c.sesion_id IS NULL OR (s.anulada=FALSE AND s.asistencia='asistio'))
+      AND (c.fecha_origen BETWEEN :from AND :to OR COALESCE(pay.monto_pagado_periodo,0)>0)
+    ORDER BY COALESCE(pay.fecha_ultimo_pago_periodo,c.fecha_origen),c.id`, { replacements: { from, to }, type: QueryTypes.SELECT });
+
+  const detail = rows.map((row) => ({
+    ...row,
+    conceptoId: Number(row.concepto_id),
+    pacienteId: Number(row.paciente_id),
+    historiaId: row.historia_id == null ? null : Number(row.historia_id),
+    sesionId: row.sesion_id == null ? null : Number(row.sesion_id),
+    monto_esperado: money(row.monto_esperado),
+    montoEsperado: money(row.monto_esperado),
+    monto_pagado: money(row.monto_pagado),
+    montoPagado: money(row.monto_pagado),
+    saldo_pendiente: money(row.saldo_pendiente),
+    saldoPendiente: money(row.saldo_pendiente),
+    metodosPago: row.metodos_pago || [],
+    estadoInterno: row.estado_interno,
+    monto_pagado_acumulado: money(row.monto_pagado_acumulado ?? row.monto_pagado),
+    originadoPeriodo: row.originado_periodo !== false,
+    estado_reporte: reportPaymentState({ activo: row.activo, exonerado: row.exonerado, estado: row.estado_interno, monto_esperado: row.monto_esperado, monto_pagado: row.monto_pagado_acumulado ?? row.monto_pagado }),
+    estadoReporte: reportPaymentState({ activo: row.activo, exonerado: row.exonerado, estado: row.estado_interno, monto_esperado: row.monto_esperado, monto_pagado: row.monto_pagado_acumulado ?? row.monto_pagado })
+  }));
+  const chargeable = detail.filter((row) => row.originadoPeriodo && row.estado_reporte !== 'EXONERADO' && row.estado_reporte !== 'ANULADO');
+  return {
+    detalle: detail,
+    totales: {
+      total_obligaciones_periodo: money(chargeable.reduce((sum, row) => sum + row.monto_esperado, 0)),
+      total_cobrado_sobre_obligaciones_periodo: money(chargeable.reduce((sum, row) => sum + row.monto_pagado, 0)),
+      total_pendiente_periodo: money(chargeable.reduce((sum, row) => sum + row.saldo_pendiente, 0)),
+      cantidad_obligaciones: chargeable.length
+    }
+  };
+};
+
 const aggregatePeriod = async (from, to) => {
   const replacements = { from, to };
   const [clinical, payments, debts, cashRows, closings, activityDays] = await Promise.all([
@@ -143,9 +224,11 @@ const periodDetails = async (from, to) => {
         s.numero_sesion
       ) AS total_sesiones,
       COALESCE(s.profesional_responsable,c.profesional_responsable,'Sin registrar') AS profesional,
+      COALESCE(ur.nombre,'Sin registrar') AS recibido_por,
       GREATEST(c.monto_esperado-COALESCE((SELECT SUM(mx.monto) FROM movimientos_pago mx WHERE mx.concepto_cobro_id=c.id AND mx.estado='Activo'),0),0) AS saldo_servicio
       FROM movimientos_pago m JOIN conceptos_cobro c ON c.id=m.concepto_cobro_id
       JOIN pacientes p ON p.id=c.paciente_id LEFT JOIN sesiones s ON s.id=c.sesion_id
+      LEFT JOIN usuarios ur ON ur.id=m.usuario_receptor_id
       LEFT JOIN operaciones_pago o ON o.id=m.operacion_pago_id
       WHERE m.estado='Activo' AND m.fecha BETWEEN :from AND :to ORDER BY m.fecha,m.hora,m.id`, { replacements, type: QueryTypes.SELECT }),
     sequelize.query(`SELECT id,fecha,hora,concepto,COALESCE(categoria,'OTROS') AS categoria,monto,metodo
@@ -183,13 +266,15 @@ const periodDetails = async (from, to) => {
 
 const consolidated = async (query = {}) => {
   const period = resolvePeriod(query);
-  const [current, previous, arqueoDiario, details] = await Promise.all([aggregatePeriod(period.desde, period.hasta), aggregatePeriod(period.anterior_desde, period.anterior_hasta), period.tipo === 'dia' ? dailyClosing(period.desde) : Promise.resolve(null), periodDetails(period.desde, period.hasta)]);
+  const [current, previous, arqueoDiario, details, obligations] = await Promise.all([aggregatePeriod(period.desde, period.hasta), aggregatePeriod(period.anterior_desde, period.anterior_hasta), period.tipo === 'dia' ? dailyClosing(period.desde) : Promise.resolve(null), periodDetails(period.desde, period.hasta), periodObligations(period.desde, period.hasta)]);
   const currentMetrics = comparableMetrics(current); const previousMetrics = comparableMetrics(previous);
   const metrics = Object.fromEntries(Object.keys(currentMetrics).map((key) => [key, variation(currentMetrics[key], previousMetrics[key])]));
   return {
     periodo: { tipo: period.tipo, desde: period.desde, hasta: period.hasta, etiqueta: period.etiqueta },
     ...current,
     ...details,
+    detalle_obligaciones: obligations.detalle,
+    obligaciones_periodo: obligations.totales,
     arqueo_diario: arqueoDiario,
     comparacion: { periodo_anterior: { desde: period.anterior_desde, hasta: period.anterior_hasta }, metricas: metrics },
     desde: period.desde, hasta: period.hasta, cantidad_cierres: current.cierres_diarios.cantidad, arqueos_cuadrados: current.cierres_diarios.cuadrados, arqueos_con_diferencia: current.cierres_diarios.con_diferencia,
@@ -199,4 +284,4 @@ const consolidated = async (query = {}) => {
   };
 };
 
-module.exports = { CATEGORIES, resolvePeriod, variation, aggregatePeriod, periodDetails, dailyClosing, consolidated };
+module.exports = { CATEGORIES, resolvePeriod, variation, reportPaymentState, periodObligations, aggregatePeriod, periodDetails, dailyClosing, consolidated };

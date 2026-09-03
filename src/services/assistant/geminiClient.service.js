@@ -2,7 +2,7 @@ const assistantSystemPrompt = require('../../config/assistant/assistantSystemPro
 const { GEMINI_FUNCTION_DECLARATIONS } = require('../../config/assistant/assistantTools');
 
 const DEFAULT_MODEL = 'gemini-3.6-flash';
-const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_TIMEOUT_MS = 20000;
 
 function getGeminiConfig(env = process.env) {
   return {
@@ -31,7 +31,7 @@ async function generateWithTimeout(client, params, timeoutMs) {
 
 const baseConfig = () => ({
   systemInstruction: assistantSystemPrompt,
-  maxOutputTokens: 600,
+  maxOutputTokens: 1000,
   tools: [{ functionDeclarations: GEMINI_FUNCTION_DECLARATIONS }]
 });
 

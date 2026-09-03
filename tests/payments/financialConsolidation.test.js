@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { sequelize } = require('../../src/models');
-const { resolvePeriod, variation, aggregatePeriod, dailyClosing, consolidated } = require('../../src/services/financialConsolidation.service');
+const { resolvePeriod, variation, reportPaymentState, periodObligations, aggregatePeriod, dailyClosing, consolidated } = require('../../src/services/financialConsolidation.service');
 
 test('día usa una sola fecha y compara contra el día anterior', () => {
   assert.deepEqual(resolvePeriod({ tipo:'dia', fecha:'2026-08-23' }), { tipo:'dia', desde:'2026-08-23', hasta:'2026-08-23', etiqueta:'Día 2026-08-23', anterior_desde:'2026-08-22', anterior_hasta:'2026-08-22' });
@@ -44,6 +44,7 @@ test('fixture semanal calcula actividad, métodos, caja y resultado sin contar a
   const original=sequelize.query;
   sequelize.query=async(sql,{replacements})=>{
     const current=replacements.from==='2026-08-17';
+    if(sql.includes('c.id AS concepto_id'))return [];
     if(sql.includes('SELECT m.id,m.fecha'))return [];
     if(sql.includes('SELECT id,fecha,hora,concepto'))return [];
     if(sql.includes('SELECT p.id AS paciente_id'))return [];
@@ -64,6 +65,60 @@ test('fixture semanal calcula actividad, métodos, caja y resultado sin contar a
     assert.equal(result.gastos_resumen.administrativos,80);assert.equal(result.gastos_resumen.insumos,120);assert.equal(result.cierres_diarios.estado,'Período con actividad financiera sin cierres diarios completos');
     assert.equal(result.comparacion.metricas.total_cobrado.etiqueta,'Nueva actividad');
   }finally{sequelize.query=original}
+});
+
+test('estados de reporte no cambian los estados financieros internos', () => {
+  assert.equal(reportPaymentState({estado:'Pagado',monto_esperado:200,monto_pagado:200}),'CANCELADO');
+  assert.equal(reportPaymentState({estado:'Parcial',monto_esperado:200,monto_pagado:100}),'PENDIENTE');
+  assert.equal(reportPaymentState({estado:'Pendiente',monto_esperado:200,monto_pagado:0}),'NO CANCELADO');
+  assert.equal(reportPaymentState({estado:'Exonerado',exonerado:true,monto_esperado:200,monto_pagado:0}),'EXONERADO');
+  assert.equal(reportPaymentState({estado:'Anulado',activo:false,monto_esperado:200,monto_pagado:0}),'ANULADO');
+  assert.equal(reportPaymentState({estado:'Saldo a favor',monto_esperado:200,monto_pagado:220}),'SALDO A FAVOR');
+});
+
+test('detalle de obligaciones devuelve una fila por concepto con pagos y recibos agregados', async () => {
+  const original=sequelize.query;let sqlSeen;let replacementsSeen;
+  sequelize.query=async(sql,{replacements})=>{sqlSeen=sql;replacementsSeen=replacements;return [
+    {concepto_id:1,fecha:'2026-08-10',paciente_id:7,paciente:'ANA PEREZ',documento:'123',historia_id:4,sesion_id:11,profesional:'FT A',monto_esperado:200,monto_pagado:200,saldo_pendiente:0,metodos_pago:['Efectivo'],recibos:['REC-1'],estado_interno:'Pagado',exonerado:false,activo:true,fecha_ultimo_pago:'2026-08-10'},
+    {concepto_id:2,fecha:'2026-08-10',paciente_id:7,paciente:'ANA PEREZ',documento:'123',historia_id:4,sesion_id:12,profesional:'FT A',monto_esperado:200,monto_pagado:0,saldo_pendiente:200,metodos_pago:[],recibos:[],estado_interno:'Pendiente',exonerado:false,activo:true,fecha_ultimo_pago:null},
+    {concepto_id:3,fecha:'2026-08-10',paciente_id:8,paciente:'LUIS ROJAS',documento:'456',historia_id:5,sesion_id:13,profesional:'FT B',monto_esperado:200,monto_pagado:100,saldo_pendiente:100,metodos_pago:['Efectivo','QR'],recibos:['REC-2','REC-3'],estado_interno:'Parcial',exonerado:false,activo:true,fecha_ultimo_pago:'2026-08-12'},
+    {concepto_id:4,fecha:'2026-08-11',paciente_id:9,paciente:'MARIA LOPEZ',documento:'789',historia_id:null,sesion_id:null,profesional:'ADMIN',monto_esperado:50,monto_pagado:0,saldo_pendiente:50,metodos_pago:[],recibos:[],estado_interno:'Pendiente',exonerado:false,activo:true,fecha_ultimo_pago:null},
+    {concepto_id:5,fecha:'2026-08-11',paciente_id:10,paciente:'JOSE DIAZ',documento:'987',historia_id:6,sesion_id:14,profesional:'FT C',monto_esperado:80,monto_pagado:0,saldo_pendiente:80,metodos_pago:[],recibos:[],estado_interno:'Exonerado',exonerado:true,activo:true,fecha_ultimo_pago:null},
+    {concepto_id:6,fecha:'2026-08-20',paciente_id:7,paciente:'ANA PEREZ',documento:'123',historia_id:4,sesion_id:9,profesional:'FT A',monto_esperado:500,monto_pagado:250,monto_pagado_acumulado:500,saldo_pendiente:0,metodos_pago:['Efectivo'],recibos:['REC-HOY'],estado_interno:'Pagado',exonerado:false,activo:true,originado_periodo:false,fecha_ultimo_pago:'2026-08-20'}
+  ]};
+  try{
+    const result=await periodObligations('2026-08-01','2026-08-31');
+    assert.equal(result.detalle.length,6);assert.equal(new Set(result.detalle.map(row=>row.conceptoId)).size,6);
+    assert.equal(result.detalle[0].estadoReporte,'CANCELADO');assert.equal(result.detalle[1].estadoReporte,'NO CANCELADO');assert.equal(result.detalle[2].estadoReporte,'PENDIENTE');
+    assert.deepEqual(result.detalle[2].recibos,['REC-2','REC-3']);assert.deepEqual(result.detalle[2].metodosPago,['Efectivo','QR']);
+    assert.equal(result.detalle[3].sesionId,null);assert.equal(result.detalle[4].estadoReporte,'EXONERADO');
+    assert.equal(result.detalle[5].montoPagado,250);assert.equal(result.detalle[5].monto_pagado_acumulado,500);assert.equal(result.detalle[5].estadoReporte,'CANCELADO');
+    assert.deepEqual(result.totales,{total_obligaciones_periodo:650,total_cobrado_sobre_obligaciones_periodo:300,total_pendiente_periodo:350,cantidad_obligaciones:4});
+    assert.deepEqual(replacementsSeen,{from:'2026-08-01',to:'2026-08-31'});
+    assert.match(sqlSeen,/FROM conceptos_cobro c/);assert.match(sqlSeen,/LEFT JOIN LATERAL/);assert.match(sqlSeen,/SUM\(m\.monto\)/);assert.match(sqlSeen,/ARRAY_AGG\(DISTINCT/);
+  }finally{sequelize.query=original}
+});
+
+test('obligaciones protegen periodo, anulados, sesiones anuladas/no asistidas y permiten concepto manual',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../../src/services/financialConsolidation.service.js'),'utf8');
+  assert.match(source,/c\.fecha_origen BETWEEN :from AND :to OR COALESCE\(pay\.monto_pagado_periodo,0\)>0/);assert.match(source,/c\.activo=TRUE/);assert.match(source,/c\.estado<>'Anulado'/);assert.match(source,/c\.monto_esperado>0/);
+  assert.match(source,/SUM\(m\.monto\) FILTER \(WHERE m\.fecha BETWEEN :from AND :to\) AS monto_pagado_periodo/);
+  assert.match(source,/c\.sesion_id IS NULL OR \(s\.anulada=FALSE AND s\.asistencia='asistio'\)/);
+  assert.match(source,/WHERE m\.concepto_cobro_id=c\.id AND m\.estado='Activo'/);
+});
+
+test('detalle diario identifica al usuario real que recibió cada pago',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../../src/services/financialConsolidation.service.js'),'utf8');
+  assert.match(source,/COALESCE\(ur\.nombre,'Sin registrar'\) AS recibido_por,[\s\S]*FROM movimientos_pago m[\s\S]*LEFT JOIN usuarios ur ON ur\.id=m\.usuario_receptor_id/);
+  const obligationsSql=source.slice(source.indexOf('const periodObligations'),source.indexOf('const aggregatePeriod'));
+  assert.doesNotMatch(obligationsSql,/\bur\./);
+});
+
+test('consolidado agrega obligaciones sin reemplazar detalle de caja ni recalcular arqueos cerrados',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../../src/services/financialConsolidation.service.js'),'utf8');
+  assert.match(source,/detalle_obligaciones: obligations\.detalle/);assert.match(source,/obligaciones_periodo: obligations\.totales/);assert.match(source,/\.\.\.details/);
+  assert.doesNotMatch(source,/ArqueoMovimientoSnapshot|ArqueoMovimientoCajaSnapshot|snapshot_resumen\s*=/);
+  assert.match(source,/resultado_neto_operativo: money\(income - expenses\)/);
 });
 
 test('consolidado GET es solo lectura y no depende de operaciones padre ni cierres', () => {

@@ -75,6 +75,8 @@ test('editar una sesion pagada sincroniza su movimiento sin duplicarlo',()=>{
   const controller=fs.readFileSync(path.join(__dirname,'../../src/controllers/sesion.controller.js'),'utf8');
   const sync=fs.readFileSync(path.join(__dirname,'../../src/services/planillaPagosSync.service.js'),'utf8');
   assert.match(controller,/sincronizarConceptoSesion\(sesion, transaction, \{ importarPago: true \}\)/);
-  assert.match(sync,/if \(\(created \|\| importarPago\)[\s\S]*const current = await MovimientoPago\.count/);
-  assert.match(sync,/if \(!current\)/);
+  assert.match(sync,/numero_recibo: receipt[\s\S]*const paymentChanged/);
+  assert.match(sync,/monto: desiredAmount, metodo: desiredMethod/);
+  assert.match(sync,/arqueo\?\.estado === 'Cerrado'[\s\S]*Reabra el arqueo/);
+  assert.match(sync,/if \(created \|\| importarPago\) await syncSessionPayment/);
 });
