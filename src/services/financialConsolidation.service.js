@@ -78,7 +78,9 @@ const reportPaymentState = ({ activo = true, exonerado = false, estado, monto_es
 
 const periodObligations = async (from, to) => {
   const rows = await sequelize.query(`SELECT
-      c.id AS concepto_id,COALESCE(pay.fecha_ultimo_pago_periodo,c.fecha_origen) AS fecha,p.id AS paciente_id,
+      c.id AS concepto_id,COALESCE(pay.fecha_ultimo_pago_periodo,c.fecha_origen) AS fecha,
+      CASE WHEN s.created_at IS NOT NULL THEN TO_CHAR(s.created_at AT TIME ZONE 'America/La_Paz','HH24:MI:SS') ELSE NULL END AS hora,
+      p.id AS paciente_id,
       TRIM(CONCAT(COALESCE(p.nombres,''),' ',COALESCE(p.apellidos,''))) AS paciente,
       COALESCE(p.numero_documento,p.ci,'Sin documento') AS documento,
       c.historia_clinica_id AS historia_id,c.sesion_id,
