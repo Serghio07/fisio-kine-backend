@@ -76,7 +76,7 @@ const reportPaymentState = ({ activo = true, exonerado = false, estado, monto_es
   return 'NO CANCELADO';
 };
 
-const periodObligations = async (from, to) => {
+const periodObligations = async (from, to, transaction = undefined) => {
   const rows = await sequelize.query(`SELECT
       c.id AS concepto_id,COALESCE(pay.fecha_ultimo_pago_periodo,c.fecha_origen) AS fecha,
       CASE WHEN s.created_at IS NOT NULL THEN TO_CHAR(s.created_at AT TIME ZONE 'America/La_Paz','HH24:MI:SS') ELSE NULL END AS hora,
@@ -114,7 +114,7 @@ const periodObligations = async (from, to) => {
       AND c.monto_esperado>0
       AND (c.sesion_id IS NULL OR (s.anulada=FALSE AND s.asistencia='asistio'))
       AND (c.fecha_origen BETWEEN :from AND :to OR COALESCE(pay.monto_pagado_periodo,0)>0)
-    ORDER BY COALESCE(pay.fecha_ultimo_pago_periodo,c.fecha_origen),c.id`, { replacements: { from, to }, type: QueryTypes.SELECT });
+    ORDER BY COALESCE(pay.fecha_ultimo_pago_periodo,c.fecha_origen),c.id`, { replacements: { from, to }, type: QueryTypes.SELECT, transaction });
 
   const detail = rows.map((row) => ({
     ...row,

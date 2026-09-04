@@ -10,6 +10,13 @@ const METHODS = ['Efectivo', 'QR', 'Transferencia', 'Tarjeta', 'Otro'];
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+const pendingObligations = (rows = []) => rows.filter((row) => money(row.saldoPendiente ?? row.saldo_pendiente) > 0);
+const historicalObligations = (snapshot, reconstructed = []) => {
+  if (Array.isArray(snapshot?.obligaciones_no_canceladas)) {
+    return { obligacionesNoCanceladas: snapshot.obligaciones_no_canceladas, fuenteObligacionesNoCanceladas: 'SNAPSHOT' };
+  }
+  return { obligacionesNoCanceladas: pendingObligations(reconstructed), fuenteObligacionesNoCanceladas: 'RECONSTRUIDO' };
+};
 
 const debtSummaryFromRows = (rows = []) => {
   const debtors = new Map(); let totalExpected = 0; let totalPending = 0;
@@ -250,11 +257,13 @@ const save = (payload, usuarioId) => sequelize.transaction(async (transaction) =
   }
   if (cashSnapshots.length) await ArqueoMovimientoCajaSnapshot.bulkCreate(cashSnapshots, { transaction });
   const responsible = await Usuario.findByPk(usuarioId, { attributes: ['id', 'nombre'], transaction });
+  const obligations = await financialConsolidation.periodObligations(fecha, fecha, transaction);
+  const unpaidSnapshot = pendingObligations(obligations.detalle);
   const snapshot = { ...calc, confirmados: Object.fromEntries(METHODS.map((m) => [m, confirmed[{ Efectivo: 'efectivo_contado', QR: 'qr_confirmado', Transferencia: 'transferencia_confirmada', Tarjeta: 'tarjeta_confirmada', Otro: 'otro_confirmado' }[m]]])),
     diferencias: differences, total_confirmado: totalConfirmed, diferencia_total: totalConfirmed === null ? null : money(totalConfirmed - calc.total_sistema),
     resultado: values.resultado_cierre, estado_cierre_snapshot: 'Cerrado', observacion_snapshot: values.observacion,
     cerrado_en_snapshot: values.cerrado_en, monto_retirado: withdrawal, saldo_dejado_caja: values.saldo_dejado_caja,
-    responsable_id: usuarioId, responsable_nombre_snapshot: responsible?.nombre || 'Responsable no disponible' };
+    responsable_id: usuarioId, responsable_nombre_snapshot: responsible?.nombre || 'Responsable no disponible', obligaciones_no_canceladas: unpaidSnapshot };
   await arqueo.update({ snapshot_resumen: snapshot }, { transaction });
   await audit(usuarioId, arqueo, 'ARQUEO_CERRADO', transaction);
   return arqueo;
@@ -280,7 +289,12 @@ const list = async (query = {}) => {
 };
 const detail = async (id) => {
   const item = await ArqueoPago.findByPk(id, { include: [{ model: Usuario, as: 'responsable', attributes: ['id', 'nombre'] }, { model: ArqueoPago, as: 'arqueoOrigenSaldo', attributes: ['id', 'numero_arqueo', 'fecha_operativa'] }, { model: ArqueoMovimientoSnapshot, as: 'movimientosSnapshot' }, { model: ArqueoMovimientoCajaSnapshot, as: 'movimientosCajaSnapshot' }] });
-  if (!item) throw fail('Arqueo no encontrado.', 404); return historicalView(item);
+  if (!item) throw fail('Arqueo no encontrado.', 404);
+  const historical = historicalView(item);
+  const frozen = historical.snapshot_resumen?.obligaciones_no_canceladas;
+  if (Array.isArray(frozen)) return { ...historical, ...historicalObligations(historical.snapshot_resumen) };
+  const obligations = await financialConsolidation.periodObligations(historical.fecha_operativa, historical.fecha_operativa);
+  return { ...historical, ...historicalObligations(historical.snapshot_resumen, obligations.detalle) };
 };
 const reopen = (id, reason, usuarioId) => sequelize.transaction(async (transaction) => {
   if (!String(reason || '').trim()) throw fail('El motivo es obligatorio.');
@@ -299,4 +313,4 @@ const consolidated = async ({ desde, hasta }) => {
   for (const key of Object.keys(result)) if (typeof result[key] === 'number' && !key.includes('cantidad') && !key.startsWith('arqueos_')) result[key] = money(result[key]); return result;
 };
 
-module.exports = { METHODS, debtSummaryFromRows, normalizeConfirmations, previousClosing, openingFromPrevious, closedCurrent, calculate, applyOpening, preview, current, save, list, detail, reopen, consolidated: financialConsolidation.consolidated };
+module.exports = { METHODS, debtSummaryFromRows, pendingObligations, historicalObligations, normalizeConfirmations, previousClosing, openingFromPrevious, closedCurrent, calculate, applyOpening, preview, current, save, list, detail, reopen, consolidated: financialConsolidation.consolidated };

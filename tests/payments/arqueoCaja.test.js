@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Op } = require('sequelize');
 const { ArqueoPago } = require('../../src/models');
-const { applyOpening, debtSummaryFromRows, normalizeConfirmations, openingFromPrevious, previousClosing, closedCurrent } = require('../../src/services/arqueoCaja.service');
+const { applyOpening, debtSummaryFromRows, pendingObligations, historicalObligations, normalizeConfirmations, openingFromPrevious, previousClosing, closedCurrent } = require('../../src/services/arqueoCaja.service');
 
 const systems = { Efectivo: 300, QR: 100, Transferencia: 0, Tarjeta: 0, Otro: 0 };
 
@@ -99,6 +99,37 @@ test('agrupa conceptos con deuda por paciente e historia e ignora concepto cero'
     { paciente_id: 2, historia_clinica_id: 20, monto_esperado: 0, total_pagado: 0 }
   ]);
   assert.equal(result.total_pendiente, 35); assert.equal(result.pacientes_deuda, 1); assert.equal(result.deudores[0].deuda, 35);
+});
+
+test('snapshot histórico conserva el pago parcial aunque existan pagos posteriores', () => {
+  const frozen = [{ montoEsperado: 300, montoPagado: 100, saldoPendiente: 200, estadoReporte: 'PENDIENTE' }];
+  const currentAfterLaterPayment = [{ montoEsperado: 300, montoPagado: 300, saldoPendiente: 0, estadoReporte: 'CANCELADO' }];
+  const result = historicalObligations({ obligaciones_no_canceladas: frozen }, currentAfterLaterPayment);
+  assert.equal(result.fuenteObligacionesNoCanceladas, 'SNAPSHOT');
+  assert.deepEqual(result.obligacionesNoCanceladas, frozen);
+  assert.equal(result.obligacionesNoCanceladas[0].saldoPendiente, 200);
+});
+
+test('arqueo antiguo sin snapshot identifica el detalle como reconstruido y conserva solo saldos pendientes', () => {
+  const reconstructed = [
+    { montoEsperado: 300, montoPagado: 100, saldoPendiente: 200, estadoReporte: 'PENDIENTE' },
+    { montoEsperado: 100, montoPagado: 100, saldoPendiente: 0, estadoReporte: 'CANCELADO' }
+  ];
+  const result = historicalObligations({ total_pendiente: 7740, pacientes_deuda: 9 }, reconstructed);
+  assert.equal(result.fuenteObligacionesNoCanceladas, 'RECONSTRUIDO');
+  assert.deepEqual(result.obligacionesNoCanceladas, [reconstructed[0]]);
+});
+
+test('cierre congela no cancelados y parciales y GET histórico permanece solo lectura', () => {
+  assert.deepEqual(pendingObligations([
+    { saldoPendiente: 200, estadoReporte: 'PENDIENTE' },
+    { saldoPendiente: 70, estadoReporte: 'NO CANCELADO' },
+    { saldoPendiente: 0, estadoReporte: 'CANCELADO' }
+  ]).map((row) => row.estadoReporte), ['PENDIENTE', 'NO CANCELADO']);
+  const source = fs.readFileSync(path.join(__dirname, '../../src/services/arqueoCaja.service.js'), 'utf8');
+  const detailSource = source.slice(source.indexOf('const detail ='), source.indexOf('const reopen ='));
+  assert.doesNotMatch(detailSource, /\.update\(|\.create\(|bulkCreate|INSERT|UPDATE|destroy/i);
+  assert.match(detailSource, /periodObligations\(historical\.fecha_operativa, historical\.fecha_operativa\)/);
 });
 
 test('apertura manual recalcula efectivo y total sistema antes de cerrar', () => {
