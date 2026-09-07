@@ -4,7 +4,7 @@ const autorizarRoles = require('../middlewares/role.middleware');
 const controller = require('../controllers/adjuntoHistoriaClinica.controller');
 const { uploadAdjuntosHistoria } = require('../middlewares/adjuntoHistoriaUpload.middleware');
 
-router.use(autenticar);
+router.use(autenticar, autorizarRoles('admin', 'personal'));
 router.get('/adjuntos-historia/conteos', controller.counts);
 router.get('/historias-clinicas/:historiaId/adjuntos', controller.list);
 router.post('/historias-clinicas/:historiaId/adjuntos', autorizarRoles('admin', 'personal'), uploadAdjuntosHistoria, controller.create);

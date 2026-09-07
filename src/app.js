@@ -71,7 +71,17 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use('/api/whatsapp', whatsappRoutes);
 if (process.env.NODE_ENV !== 'production') app.use(morgan('dev'));
 app.use(registrarActividad);
-app.use('/uploads', express.static(path.resolve(__dirname, '../uploads'), { maxAge: '1d', fallthrough: false }));
+// Solo el contenido de la web publica se sirve sin sesion. Los adjuntos
+// clinicos se entregan exclusivamente desde /api/adjuntos-historia/:id/archivo.
+for (const publicFolder of ['blog', 'galeria']) {
+  app.use(`/uploads/${publicFolder}`, express.static(path.resolve(__dirname, '../uploads', publicFolder), {
+    maxAge: '1d', fallthrough: false, dotfiles: 'deny'
+  }));
+}
+app.use('/uploads', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(404).json({ message: 'Archivo no encontrado.' });
+});
 
 app.get('/api/health', async (req, res) => {
   let database = 'unavailable';
