@@ -17,3 +17,5 @@ uploads/temp/
 /credentials/
 *.credentials.json
 *.secret
+
+/uploads/
