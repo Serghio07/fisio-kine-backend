@@ -4,9 +4,77 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Op } = require('sequelize');
 const { ArqueoPago } = require('../../src/models');
-const { applyOpening, debtSummaryFromRows, pendingObligations, historicalObligations, normalizeConfirmations, openingFromPrevious, previousClosing, closedCurrent } = require('../../src/services/arqueoCaja.service');
+const { applyOpening, buildResumenCobros, debtSummaryFromRows, pendingObligations, historicalObligations, normalizeConfirmations, openingFromPrevious, previousClosing, closedCurrent } = require('../../src/services/arqueoCaja.service');
 
 const systems = { Efectivo: 300, QR: 100, Transferencia: 0, Tarjeta: 0, Otro: 0 };
+
+test('resumen de cobros conserva los cinco métodos y calcula escenarios básicos', () => {
+  assert.deepEqual(buildResumenCobros([{ estado_snapshot: 'Activo', metodo_snapshot: 'Efectivo', monto_snapshot: '300.00' }], 300), {
+    efectivo: 300, qr: 0, transferencia: 0, tarjeta: 0, otro: 0, totalCobrado: 300,
+    fuente: 'SNAPSHOT', totalHistorico: 300, consistenteConTotalHistorico: true
+  });
+  assert.equal(buildResumenCobros([{ estado_snapshot: 'Activo', metodo_snapshot: 'QR', monto_snapshot: '450.00' }]).totalCobrado, 450);
+  assert.equal(buildResumenCobros([
+    { estado_snapshot: 'Activo', metodo_snapshot: 'Efectivo', monto_snapshot: '300' },
+    { estado_snapshot: 'Activo', metodo_snapshot: 'QR', monto_snapshot: '450' }
+  ]).totalCobrado, 750);
+});
+
+test('resumen de cobros suma todos los métodos, decimales y legacy en Otro', () => {
+  const result = buildResumenCobros([
+    { estado_snapshot: 'Activo', metodo_snapshot: 'Efectivo', monto_snapshot: '300.00' },
+    { estado_snapshot: 'Activo', metodo_snapshot: 'QR', monto_snapshot: '450.00' },
+    { estado_snapshot: 'Activo', metodo_snapshot: 'Transferencia', monto_snapshot: '100.00' },
+    { estado_snapshot: 'Activo', metodo_snapshot: 'Tarjeta', monto_snapshot: '50.00' },
+    { estado_snapshot: 'Activo', metodo_snapshot: 'Otro', monto_snapshot: '25.00' },
+    { estado_snapshot: 'Activo', metodo_snapshot: 'Cheque legacy', monto_snapshot: '5.25' }
+  ]);
+  assert.deepEqual({ efectivo: result.efectivo, qr: result.qr, transferencia: result.transferencia, tarjeta: result.tarjeta, otro: result.otro, total: result.totalCobrado },
+    { efectivo: 300, qr: 450, transferencia: 100, tarjeta: 50, otro: 30.25, total: 930.25 });
+  const decimals = buildResumenCobros([
+    { estado_snapshot: 'Activo', metodo_snapshot: 'Efectivo', monto_snapshot: '95.50' },
+    { estado_snapshot: 'Activo', metodo_snapshot: 'QR', monto_snapshot: '30.25' }
+  ]);
+  assert.equal(decimals.totalCobrado, 125.75);
+});
+
+test('resumen de cobros excluye anulados, valores inválidos y movimientos de caja', () => {
+  const result = buildResumenCobros([
+    { estado_snapshot: 'Anulado', metodo_snapshot: 'Efectivo', monto_snapshot: '900' },
+    { estado_snapshot: 'Activo', metodo_snapshot: 'QR', monto_snapshot: 'valor inválido' },
+    { estado_snapshot: 'ACTIVO', metodo_snapshot: 'Efectivo', monto_snapshot: '700', tipo_movimiento_snapshot: 'INGRESO_EXTRAORDINARIO' },
+    { estado_snapshot: 'ACTIVO', metodo_snapshot: 'Efectivo', monto_snapshot: '600', tipo_movimiento_snapshot: 'EGRESO' },
+    { estado_snapshot: 'ACTIVO', metodo_snapshot: 'Efectivo', monto_snapshot: '500', tipo_movimiento_snapshot: 'APORTE_CAJA' },
+    { estado_snapshot: 'ACTIVO', metodo_snapshot: 'Efectivo', monto_snapshot: '400', tipo_movimiento_snapshot: 'RETIRO_CAJA' },
+    { estado_snapshot: 'ACTIVO', metodo_snapshot: 'Efectivo', monto_snapshot: '300', tipo_movimiento_snapshot: 'AJUSTE_POSITIVO' }
+  ], 100);
+  assert.equal(result.totalCobrado, 0);
+  assert.equal(result.efectivo, 0);
+  assert.equal(result.qr, 0);
+  assert.equal(result.consistenteConTotalHistorico, false);
+});
+
+test('resumen histórico depende sólo de snapshots y funciona con resumen legacy o total cero', () => {
+  const frozen = [{ estado_snapshot: 'Activo', metodo_snapshot: 'QR', monto_snapshot: '80.00', movimientoOriginal: { monto: 999, metodo: 'Efectivo', estado: 'Anulado' } }];
+  const historical = buildResumenCobros(frozen, '80.00');
+  assert.equal(historical.qr, 80);
+  assert.equal(historical.efectivo, 0);
+  assert.equal(historical.consistenteConTotalHistorico, true);
+  const empty = buildResumenCobros([], 0);
+  assert.deepEqual([empty.efectivo, empty.qr, empty.transferencia, empty.tarjeta, empty.otro, empty.totalCobrado], [0, 0, 0, 0, 0, 0]);
+  assert.equal(empty.consistenteConTotalHistorico, true);
+});
+
+test('reabrir sin recerrar conserva el resumen congelado y no duplica importes', () => {
+  const snapshots = [
+    { id: 1, estado_snapshot: 'Activo', metodo_snapshot: 'Efectivo', monto_snapshot: '30.00' },
+    { id: 2, estado_snapshot: 'Activo', metodo_snapshot: 'QR', monto_snapshot: '45.00' }
+  ];
+  const original = buildResumenCobros(snapshots, 75);
+  const reopened = buildResumenCobros(snapshots, 75);
+  assert.deepEqual(reopened, original);
+  assert.equal(reopened.totalCobrado, 75);
+});
 
 test('cierre anterior con Bs 300 define automáticamente la apertura en Bs 300', () => {
   const result = openingFromPrevious({ id: 8, numero_arqueo: 'ARQ-8', fecha_operativa: '2026-08-22', saldo_dejado_caja: 300 });
@@ -130,6 +198,8 @@ test('cierre congela no cancelados y parciales y GET histórico permanece solo l
   const detailSource = source.slice(source.indexOf('const detail ='), source.indexOf('const reopen ='));
   assert.doesNotMatch(detailSource, /\.update\(|\.create\(|bulkCreate|INSERT|UPDATE|destroy/i);
   assert.match(detailSource, /periodObligations\(historical\.fecha_operativa, historical\.fecha_operativa\)/);
+  assert.match(detailSource, /buildResumenCobros\(\s*historical\.movimientosSnapshot/);
+  assert.match(detailSource, /resumenCobros/);
 });
 
 test('apertura manual recalcula efectivo y total sistema antes de cerrar', () => {

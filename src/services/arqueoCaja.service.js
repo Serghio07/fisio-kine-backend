@@ -8,8 +8,36 @@ const financialConsolidation = require('./financialConsolidation.service');
 
 const METHODS = ['Efectivo', 'QR', 'Transferencia', 'Tarjeta', 'Otro'];
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+const safeMoney = (value) => {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? money(numeric) : 0;
+};
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+const buildResumenCobros = (rows = [], historicalTotal = null) => {
+  const totals = Object.fromEntries(METHODS.map((method) => [method, 0]));
+  for (const source of Array.isArray(rows) ? rows : []) {
+    const row = source?.toJSON ? source.toJSON() : source;
+    if (!row || Object.prototype.hasOwnProperty.call(row, 'tipo_movimiento_snapshot')) continue;
+    if (String(row.estado_snapshot ?? '').trim().toLowerCase() !== 'activo') continue;
+    const method = METHODS.includes(row.metodo_snapshot) ? row.metodo_snapshot : 'Otro';
+    totals[method] = money(totals[method] + safeMoney(row.monto_snapshot));
+  }
+  const totalCobrado = money(METHODS.reduce((sum, method) => sum + totals[method], 0));
+  const historicalNumeric = historicalTotal === null || historicalTotal === undefined ? null : Number(historicalTotal);
+  const totalHistorico = Number.isFinite(historicalNumeric) ? money(historicalNumeric) : null;
+  return {
+    efectivo: totals.Efectivo,
+    qr: totals.QR,
+    transferencia: totals.Transferencia,
+    tarjeta: totals.Tarjeta,
+    otro: totals.Otro,
+    totalCobrado,
+    fuente: 'SNAPSHOT',
+    totalHistorico,
+    consistenteConTotalHistorico: totalHistorico === null ? null : totalCobrado === totalHistorico
+  };
+};
 const pendingObligations = (rows = []) => rows.filter((row) => money(row.saldoPendiente ?? row.saldo_pendiente) > 0);
 const historicalObligations = (snapshot, reconstructed = []) => {
   if (Array.isArray(snapshot?.obligaciones_no_canceladas)) {
@@ -291,10 +319,14 @@ const detail = async (id) => {
   const item = await ArqueoPago.findByPk(id, { include: [{ model: Usuario, as: 'responsable', attributes: ['id', 'nombre'] }, { model: ArqueoPago, as: 'arqueoOrigenSaldo', attributes: ['id', 'numero_arqueo', 'fecha_operativa'] }, { model: ArqueoMovimientoSnapshot, as: 'movimientosSnapshot' }, { model: ArqueoMovimientoCajaSnapshot, as: 'movimientosCajaSnapshot' }] });
   if (!item) throw fail('Arqueo no encontrado.', 404);
   const historical = historicalView(item);
+  const resumenCobros = buildResumenCobros(
+    historical.movimientosSnapshot,
+    historical.snapshot_resumen?.total_cobrado ?? historical.total_cobrado
+  );
   const frozen = historical.snapshot_resumen?.obligaciones_no_canceladas;
-  if (Array.isArray(frozen)) return { ...historical, ...historicalObligations(historical.snapshot_resumen) };
+  if (Array.isArray(frozen)) return { ...historical, ...historicalObligations(historical.snapshot_resumen), resumenCobros };
   const obligations = await financialConsolidation.periodObligations(historical.fecha_operativa, historical.fecha_operativa);
-  return { ...historical, ...historicalObligations(historical.snapshot_resumen, obligations.detalle) };
+  return { ...historical, ...historicalObligations(historical.snapshot_resumen, obligations.detalle), resumenCobros };
 };
 const reopen = (id, reason, usuarioId) => sequelize.transaction(async (transaction) => {
   if (!String(reason || '').trim()) throw fail('El motivo es obligatorio.');
@@ -313,4 +345,4 @@ const consolidated = async ({ desde, hasta }) => {
   for (const key of Object.keys(result)) if (typeof result[key] === 'number' && !key.includes('cantidad') && !key.startsWith('arqueos_')) result[key] = money(result[key]); return result;
 };
 
-module.exports = { METHODS, debtSummaryFromRows, pendingObligations, historicalObligations, normalizeConfirmations, previousClosing, openingFromPrevious, closedCurrent, calculate, applyOpening, preview, current, save, list, detail, reopen, consolidated: financialConsolidation.consolidated };
+module.exports = { METHODS, buildResumenCobros, debtSummaryFromRows, pendingObligations, historicalObligations, normalizeConfirmations, previousClosing, openingFromPrevious, closedCurrent, calculate, applyOpening, preview, current, save, list, detail, reopen, consolidated: financialConsolidation.consolidated };
